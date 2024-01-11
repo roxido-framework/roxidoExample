@@ -4,3 +4,5 @@ export(convolve2)
 export(myrnorm)
 export(zero)
 useDynLib(roxidoExample, .registration = TRUE)
+
+# TEST
