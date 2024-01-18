@@ -645,6 +645,7 @@ impl<RType, RMode> RObject<RType, RMode> {
         unsafe { Rf_isNull(self.sexp) != 0 }
     }
 
+    /// Returns the result of the is_null method, but as an Option value.
     pub fn option(self) -> Option<RObject<RType, RMode>> {
         if self.is_null() {
             None
@@ -1169,6 +1170,7 @@ pub struct RListMap<'a> {
 }
 
 impl RListMap<'_> {
+    /// Find an RObject in the map based on its name.
     pub fn get(&mut self, name: &str) -> Result<RObject, String> {
         let Some(index) = self.map.get(name) else {
             return Err(format!("'{}' not found", name));
@@ -1180,6 +1182,7 @@ impl RListMap<'_> {
         Ok(self.robj.get(*index)?)
     }
 
+    /// Check to see if every RObject in the map has been used.
     pub fn exhaustive(&self) -> Result<(), String> {
         if self.unused_counter != 0 {
             return Err(format!(
@@ -1190,10 +1193,12 @@ impl RListMap<'_> {
         Ok(())
     }
 
+    /// Return the number of unused RObjects in the map.
     pub fn unused_counter(&self) -> usize {
         self.unused_counter
     }
 
+    /// Return the names of all unused RObjects in the map.
     pub fn unused_elements(&self) -> Vec<&str> {
         let result = self
             .map
@@ -1225,6 +1230,7 @@ impl RObject<Vector, List> {
         }
     }
 
+    /// Get a value from the List based on its key.
     pub fn get_by_key(&self, key: impl AsRef<str>) -> Result<RObject, String> {
         let names = self.get_names();
         for i in 0..names.len() {
@@ -1235,6 +1241,11 @@ impl RObject<Vector, List> {
         Err(format!("Could not find '{}' in the list", key.as_ref()))
     }
 
+    /// Convert the list into an [RListMap]
+    ///
+    /// This allows Rust HashMap methods to be used on the contents
+    /// of the list, while still retaining the original List within
+    /// the RListMap struct in the robj field.
     pub fn make_map(&self) -> RListMap {
         let mut map = HashMap::new();
         let names = self.get_names();
