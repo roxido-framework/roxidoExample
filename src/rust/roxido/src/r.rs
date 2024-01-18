@@ -12,6 +12,7 @@
 use crate::pc::Pc;
 use crate::rbindings::*;
 
+use std::collections::HashMap;
 use std::ffi::{c_char, c_void, CStr};
 use std::marker::PhantomData;
 use std::ops::Deref;
@@ -187,10 +188,10 @@ impl R {
     ///
     pub fn new_error(message: &str, pc: &mut Pc) -> RObject {
         let list = Self::new_list(2, pc);
-        let _ = list.set(0, &message.to_r(pc));
-        let _ = list.set(1, &Self::null());
-        let _ = list.set_names(&["message", "calls"].to_r(pc));
-        list.set_class(&["error", "condition"].to_r(pc));
+        let _ = list.set(0, message.to_r(pc));
+        let _ = list.set(1, Self::null());
+        let _ = list.set_names(["message", "calls"].to_r(pc));
+        list.set_class(["error", "condition"].to_r(pc));
         list.convert()
     }
 
@@ -238,7 +239,7 @@ impl R {
     ///
     pub fn encode<T, RType, RMode>(
         x: T,
-        tag: &RObject<RType, RMode>,
+        tag: RObject<RType, RMode>,
         managed_by_r: bool,
         pc: &mut Pc,
     ) -> RObject<ExternalPtr, ()> {
@@ -353,6 +354,17 @@ impl R {
 pub struct RObject<RType = AnyType, RMode = Unknown> {
     pub sexp: SEXP,
     rtype: PhantomData<(RType, RMode)>,
+}
+
+impl<RType, RMode> Copy for RObject<RType, RMode> {}
+
+impl<RType, RMode> Clone for RObject<RType, RMode> {
+    fn clone(&self) -> Self {
+        RObject {
+            sexp: self.sexp,
+            rtype: self.rtype,
+        }
+    }
 }
 
 impl<RType, RMode> RObject<RType, RMode> {
@@ -633,6 +645,14 @@ impl<RType, RMode> RObject<RType, RMode> {
         unsafe { Rf_isNull(self.sexp) != 0 }
     }
 
+    pub fn option(self) -> Option<RObject<RType, RMode>> {
+        if self.is_null() {
+            None
+        } else {
+            Some(self)
+        }
+    }
+
     /// Check if RObject can be interpreted as an R NA value.
     pub fn is_na(&self) -> bool {
         match self.as_vector() {
@@ -681,22 +701,22 @@ impl<RType, RMode> RObject<RType, RMode> {
     }
 
     /// Set the class or classes of the data for an RObject.
-    pub fn set_class(&self, names: &RObject<Vector, Character>) {
+    pub fn set_class(&self, names: RObject<Vector, Character>) {
         unsafe {
             Rf_classgets(self.sexp, names.sexp);
         }
     }
 
     /// Get an attribute.
-    pub fn get_attribute(&self, which: &RObject<Symbol, ()>) -> RObject {
+    pub fn get_attribute(&self, which: RObject<Symbol, ()>) -> RObject {
         R::wrap(unsafe { Rf_getAttrib(self.sexp, which.sexp) })
     }
 
     /// Set an attribute.
     pub fn set_attribute<RTypeValue, RModeValue>(
         &self,
-        which: &RObject<Symbol, ()>,
-        value: &RObject<RTypeValue, RModeValue>,
+        which: RObject<Symbol, ()>,
+        value: RObject<RTypeValue, RModeValue>,
     ) {
         unsafe {
             Rf_setAttrib(self.sexp, which.sexp, value.sexp);
@@ -881,11 +901,10 @@ impl<T> RObject<Matrix, T> {
     /// Transpose the matrix.
     pub fn transpose(&self, pc: &mut Pc) -> RObject<Matrix, T> {
         let transposed = self.duplicate(pc);
-        let dim: RObject<Vector, i32> =
-            self.get_attribute(&R::symbol_dim()).duplicate(pc).convert();
+        let dim: RObject<Vector, i32> = self.get_attribute(R::symbol_dim()).duplicate(pc).convert();
         let slice = dim.slice();
         slice.swap(0, 1);
-        transposed.set_attribute(&R::symbol_dim(), &dim);
+        transposed.set_attribute(R::symbol_dim(), dim);
         unsafe { Rf_copyMatrix(transposed.sexp, self.sexp, Rboolean_TRUE) };
         transposed
     }
@@ -938,7 +957,7 @@ impl RObject<Function, ()> {
     }
 
     /// Evaluate a function with 1 parameter.
-    pub fn call1<T1, M1>(&self, arg1: &RObject<T1, M1>, pc: &mut Pc) -> Result<RObject, i32> {
+    pub fn call1<T1, M1>(&self, arg1: RObject<T1, M1>, pc: &mut Pc) -> Result<RObject, i32> {
         let expression = unsafe { Rf_lang2(self.sexp, arg1.sexp) };
         Self::eval(expression, pc)
     }
@@ -946,8 +965,8 @@ impl RObject<Function, ()> {
     /// Evaluate a function with 2 parameters.
     pub fn call2<T1, M1, T2, M2>(
         &self,
-        arg1: &RObject<T1, M1>,
-        arg2: &RObject<T2, M2>,
+        arg1: RObject<T1, M1>,
+        arg2: RObject<T2, M2>,
         pc: &mut Pc,
     ) -> Result<RObject, i32> {
         let expression = unsafe { Rf_lang3(self.sexp, arg1.sexp, arg2.sexp) };
@@ -957,9 +976,9 @@ impl RObject<Function, ()> {
     /// Evaluate a function with 3 parameters.
     pub fn call3<T1, M1, T2, M2, T3, M3>(
         &self,
-        arg1: &RObject<T1, M1>,
-        arg2: &RObject<T2, M2>,
-        arg3: &RObject<T3, M3>,
+        arg1: RObject<T1, M1>,
+        arg2: RObject<T2, M2>,
+        arg3: RObject<T3, M3>,
         pc: &mut Pc,
     ) -> Result<RObject, i32> {
         let expression = unsafe { Rf_lang4(self.sexp, arg1.sexp, arg2.sexp, arg3.sexp) };
@@ -969,10 +988,10 @@ impl RObject<Function, ()> {
     /// Evaluate a function with 4 parameters.
     pub fn call4<T1, M1, T2, M2, T3, M3, T4, M4>(
         &self,
-        arg1: &RObject<T1, M1>,
-        arg2: &RObject<T2, M2>,
-        arg3: &RObject<T3, M3>,
-        arg4: &RObject<T4, M4>,
+        arg1: RObject<T1, M1>,
+        arg2: RObject<T2, M2>,
+        arg3: RObject<T3, M3>,
+        arg4: RObject<T4, M4>,
         pc: &mut Pc,
     ) -> Result<RObject, i32> {
         let expression = unsafe { Rf_lang5(self.sexp, arg1.sexp, arg2.sexp, arg3.sexp, arg4.sexp) };
@@ -982,11 +1001,11 @@ impl RObject<Function, ()> {
     /// Evaluate a function with 5 parameters.
     pub fn call5<T1, M1, T2, M2, T3, M3, T4, M4, T5, M5>(
         &self,
-        arg1: &RObject<T1, M1>,
-        arg2: &RObject<T2, M2>,
-        arg3: &RObject<T3, M3>,
-        arg4: &RObject<T4, M4>,
-        arg5: &RObject<T5, M5>,
+        arg1: RObject<T1, M1>,
+        arg2: RObject<T2, M2>,
+        arg3: RObject<T3, M3>,
+        arg4: RObject<T4, M4>,
+        arg5: RObject<T5, M5>,
         pc: &mut Pc,
     ) -> Result<RObject, i32> {
         let expression = unsafe {
@@ -1031,7 +1050,7 @@ impl<RMode> RObject<Vector, RMode> {
     }
 
     /// Set names of values in a Vector.
-    pub fn set_names(&self, names: &RObject<Vector, Character>) -> Result<(), &'static str> {
+    pub fn set_names(&self, names: RObject<Vector, Character>) -> Result<(), &'static str> {
         if unsafe { Rf_length(names.sexp) != Rf_length(self.sexp) } {
             return Err("Length of names is not correct");
         }
@@ -1142,6 +1161,50 @@ impl RObject<Vector, Character> {
     }
 }
 
+pub struct RListMap<'a> {
+    unused_counter: usize,
+    used: Vec<bool>,
+    robj: &'a RObject<Vector, List>,
+    map: HashMap<&'a str, usize>,
+}
+
+impl RListMap<'_> {
+    pub fn get(&mut self, name: &str) -> Result<RObject, String> {
+        let Some(index) = self.map.get(name) else {
+            return Err(format!("'{}' not found", name));
+        };
+        if !self.used[*index] {
+            self.unused_counter -= 1;
+            self.used[*index] = true;
+        }
+        Ok(self.robj.get(*index)?)
+    }
+
+    pub fn exhaustive(&self) -> Result<(), String> {
+        if self.unused_counter != 0 {
+            return Err(format!(
+                "Unrecognized elements in list:\n    {}",
+                self.unused_elements().join("\n    ")
+            ));
+        }
+        Ok(())
+    }
+
+    pub fn unused_counter(&self) -> usize {
+        self.unused_counter
+    }
+
+    pub fn unused_elements(&self) -> Vec<&str> {
+        let result = self
+            .map
+            .iter()
+            .filter(|(_, index)| !self.used[**index])
+            .map(|(name, _)| *name)
+            .take(self.unused_counter);
+        result.collect()
+    }
+}
+
 impl RObject<Vector, List> {
     /// Get the value at a certain index in a List.
     pub fn get(&self, index: usize) -> Result<RObject, &'static str> {
@@ -1152,7 +1215,7 @@ impl RObject<Vector, List> {
     pub fn set<RType, RMode>(
         &self,
         index: usize,
-        value: &RObject<RType, RMode>,
+        value: RObject<RType, RMode>,
     ) -> Result<(), &'static str> {
         if index < self.len() {
             unsafe { SET_VECTOR_ELT(self.sexp, index.try_into().unwrap(), value.sexp) };
@@ -1162,11 +1225,36 @@ impl RObject<Vector, List> {
         }
     }
 
+    pub fn get_by_key(&self, key: impl AsRef<str>) -> Result<RObject, String> {
+        let names = self.get_names();
+        for i in 0..names.len() {
+            if names.get(i).unwrap() == key.as_ref() {
+                return Ok(self.get(i)?);
+            }
+        }
+        Err(format!("Could not find '{}' in the list", key.as_ref()))
+    }
+
+    pub fn make_map(&self) -> RListMap {
+        let mut map = HashMap::new();
+        let names = self.get_names();
+        let len = names.len();
+        for i in 0..len {
+            map.insert(names.get(i).unwrap(), i);
+        }
+        RListMap {
+            unused_counter: len,
+            used: vec![false; len],
+            robj: &self,
+            map,
+        }
+    }
+
     /// Convert a List to a DataFrame.
     pub fn to_data_frame(
         &self,
-        names: &RObject<Vector, Character>,
-        rownames: &RObject<Vector, Character>,
+        names: RObject<Vector, Character>,
+        rownames: RObject<Vector, Character>,
         pc: &mut Pc,
     ) -> Result<RObject<Vector, DataFrame>, &'static str> {
         if names.len() != self.len() {
@@ -1190,7 +1278,7 @@ impl RObject<Vector, List> {
         }
         self.set_names(names)?;
         unsafe { Rf_setAttrib(self.sexp, R_RowNamesSymbol, rownames.sexp) };
-        self.set_class(&["data.frame"].to_r(pc));
+        self.set_class(["data.frame"].to_r(pc));
         Ok(self.convert())
     }
 }
@@ -1205,7 +1293,7 @@ impl RObject<Vector, DataFrame> {
     pub fn set<RType, RMode>(
         &self,
         index: usize,
-        value: &RObject<RType, RMode>,
+        value: RObject<RType, RMode>,
     ) -> Result<(), &'static str> {
         self.convert::<Vector, List>().set(index, value)
     }
@@ -1216,7 +1304,7 @@ impl RObject<Vector, DataFrame> {
     }
 
     /// Set the row names of a DataFrame.
-    pub fn set_rownames(&self, rownames: &RObject<Vector, Character>) -> Result<(), &'static str> {
+    pub fn set_rownames(&self, rownames: RObject<Vector, Character>) -> Result<(), &'static str> {
         if unsafe { Rf_length(rownames.sexp) != Rf_length(self.sexp) } {
             return Err("Length of row names is not correct");
         }
@@ -1238,7 +1326,7 @@ impl<RMode> RObject<Matrix, RMode> {
     }
 
     /// Set the dimnames of a matrix.
-    pub fn set_dimnames(&self, dimnames: &RObject<Vector, List>) -> Result<(), &'static str> {
+    pub fn set_dimnames(&self, dimnames: RObject<Vector, List>) -> Result<(), &'static str> {
         if dimnames.len() != 2 {
             return Err("Length should be two");
         }
@@ -1416,6 +1504,12 @@ impl RObject<ExternalPtr, ()> {
 }
 
 // Conversions
+
+pub trait FromR {
+    fn from_r(x: RObject, pc: &mut Pc) -> Result<Self, String>
+    where
+        Self: Sized;
+}
 
 /// Trait for converting objects to RObjects.
 ///
