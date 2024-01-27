@@ -789,7 +789,7 @@ impl<S: HasLength, T: Atomic> RObject<S, T> {
         if self.is_mode_double() {
             Ok(self.convert())
         } else {
-            Err("Not an f64 vector")
+            Err("Not an double vector")
         }
     }
 
@@ -798,7 +798,7 @@ impl<S: HasLength, T: Atomic> RObject<S, T> {
         if self.is_mode_integer() {
             Ok(self.convert())
         } else {
-            Err("Not an f64 vector")
+            Err("Not an integer vector")
         }
     }
 
@@ -807,7 +807,7 @@ impl<S: HasLength, T: Atomic> RObject<S, T> {
         if self.is_mode_raw() {
             Ok(self.convert())
         } else {
-            Err("Not an f64 vector")
+            Err("Not an raw vector")
         }
     }
 
@@ -816,7 +816,7 @@ impl<S: HasLength, T: Atomic> RObject<S, T> {
         if self.is_mode_logical() {
             Ok(self.convert())
         } else {
-            Err("Not an f64 vector")
+            Err("Not an logical vector")
         }
     }
 
@@ -825,7 +825,7 @@ impl<S: HasLength, T: Atomic> RObject<S, T> {
         if self.is_mode_character() {
             Ok(self.convert())
         } else {
-            Err("Not an f64 vector")
+            Err("Not an character vector")
         }
     }
 
