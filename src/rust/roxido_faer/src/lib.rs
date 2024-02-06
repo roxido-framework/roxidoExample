@@ -11,7 +11,7 @@ impl RMatrix2Faer for RObject<Matrix, f64> {
         Ok({
             let nrow = self.nrow();
             unsafe {
-                MatRef::from_raw_parts(
+                faer_core::mat::from_raw_parts(
                     self.slice().as_ptr(),
                     nrow,
                     self.ncol(),
