@@ -1468,7 +1468,7 @@ impl RObject<ExternalPtr, ()> {
     ///
     /// This method obtained a reference to a Rust object from an R external pointer created by [`Self::as_external_ptr`].
     ///
-    pub fn decode_as_ref<T>(&self) -> &'static T {
+    pub fn decode_as_ref<T>(&self) -> &T {
         unsafe {
             let ptr = R_ExternalPtrAddr(self.sexp) as *mut T;
             ptr.as_ref().unwrap()
@@ -1479,7 +1479,7 @@ impl RObject<ExternalPtr, ()> {
     ///
     /// This method obtained a mutable reference to a Rust object from an R external pointer created by [`Self::as_external_ptr`].
     ///
-    pub fn decode_as_mut<T>(&mut self) -> &'static mut T {
+    pub fn decode_as_mut<T>(&mut self) -> &mut T {
         unsafe {
             let ptr = R_ExternalPtrAddr(self.sexp) as *mut T;
             ptr.as_mut().unwrap()
