@@ -9,20 +9,18 @@ fn convolve2(a: RObject, b: RObject) -> RObject {
     let a = a
         .as_vector()
         .stop_str("'a' not a vector.")
-        .to_mode_double(pc)
-        .slice();
+        .to_mode_double(pc);
     let b = b
         .as_vector()
         .stop_str("'b' not a vector.")
-        .to_mode_double(pc)
-        .slice();
+        .to_mode_double(pc);
     let r = R::new_vector_double(a.len() + b.len() - 1, pc);
     let ab = r.slice();
     for abi in ab.iter_mut() {
         *abi = 0.0;
     }
-    for (i, ai) in a.iter().enumerate() {
-        for (j, bj) in b.iter().enumerate() {
+    for (i, ai) in a.slice().iter().enumerate() {
+        for (j, bj) in b.slice().iter().enumerate() {
             ab[i + j] += ai * bj;
         }
     }
@@ -43,12 +41,14 @@ fn zero(f: RObject, guesses: RObject, tol: RObject) -> RObject {
         .as_vector()
         .stop_str("'guesses' must be a vector.")
         .as_mode_double()
-        .stop_str("'guess' must have storage mode 'double'.")
-        .slice();
+        .stop_str("'guess' must have storage mode 'double'.");
     if guesses.len() != 2 {
         stop!("'guesses' should be of length two.");
     }
-    let (mut x0, mut x1) = (guesses[0], guesses[1]);
+    let (mut x0, mut x1) = {
+        let g = guesses.slice();
+        (g[0], g[1])
+    };
     let tol = tol.as_f64().stop_str("'tol' should be a numeric scalar.");
     if !tol.is_finite() || tol <= 0.0 {
         stop!("'tol' must be a strictly positive value.");
