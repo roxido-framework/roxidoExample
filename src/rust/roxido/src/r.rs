@@ -1626,10 +1626,8 @@ impl<RMutability> RObject<ExternalPtr, (), RMutability> {
     }
 
     pub unsafe fn decode_as_ref_static<T>(&self) -> &'static T {
-        unsafe {
-            let ptr = R_ExternalPtrAddr(self.sexp) as *mut T;
-            ptr.as_ref().unwrap()
-        }
+        let ptr = R_ExternalPtrAddr(self.sexp) as *mut T;
+        ptr.as_ref().unwrap()
     }
 
     /// Obtain a mutable reference to a Rust object from an R external pointer.
@@ -1644,10 +1642,8 @@ impl<RMutability> RObject<ExternalPtr, (), RMutability> {
     }
 
     pub unsafe fn decode_as_mut_static<T>(&mut self) -> &'static mut T {
-        unsafe {
-            let ptr = R_ExternalPtrAddr(self.sexp) as *mut T;
-            ptr.as_mut().unwrap()
-        }
+        let ptr = R_ExternalPtrAddr(self.sexp) as *mut T;
+        ptr.as_mut().unwrap()
     }
 
     /// Get the memory address of the external pointer.
