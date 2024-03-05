@@ -400,6 +400,11 @@ impl<RType, RMode, RMutability> RObject<RType, RMode, RMutability> {
         self.convert()
     }
 
+    /// Recharacterize an RObject<RType, RMode, RMutability> as an RObject (i.e., an RObject<AnyType, Unknown, Immutable>).
+    pub unsafe fn as_mutable(&self) -> RObject<RType, RMode, Mutable> {
+        self.convert()
+    }
+
     /// Check if appropriate to characterize as an RObject<Vector, Unknown, RMutability>.
     /// Checks using R's `Rf_isVectorAtomic` function.
     pub fn as_vector(&self) -> Result<RObject<Vector, Unknown, RMutability>, &'static str> {
@@ -783,15 +788,13 @@ impl<S: HasLength, RMode, RMutability> RObject<S, RMode, RMutability> {
 
 impl<RType: HasLength, RMode: Atomic> RObject<RType, RMode, Mutable> {
     fn slice_mut_engine<U>(&self, data: *mut U) -> &mut [U] {
-        let len = self.len();
-        unsafe { std::slice::from_raw_parts_mut(data, len) }
+        unsafe { std::slice::from_raw_parts_mut(data, self.len()) }
     }
 }
 
 impl<RType: HasLength, RMode: Atomic, RMutability> RObject<RType, RMode, RMutability> {
     fn slice_engine<V>(&self, data: *mut V) -> &[V] {
-        let len = self.len();
-        unsafe { std::slice::from_raw_parts_mut(data, len) }
+        unsafe { std::slice::from_raw_parts_mut(data, self.len()) }
     }
 
     /// Checks to see if the data can be interpreted as R double.
@@ -897,12 +900,20 @@ impl<RType: HasLength, RMutability> RObject<RType, f64, RMutability> {
     pub fn slice(&self) -> &[f64] {
         self.slice_engine(unsafe { REAL(self.sexp) })
     }
+
+    pub unsafe fn slice_static(&self) -> &'static [f64] {
+        std::slice::from_raw_parts_mut(REAL(self.sexp), self.len())
+    }
 }
 
 impl<RType: HasLength> RObject<RType, f64, Mutable> {
     /// Returns a slice of the data structure.
     pub fn slice_mut(&self) -> &mut [f64] {
         self.slice_mut_engine(unsafe { REAL(self.sexp) })
+    }
+
+    pub unsafe fn slice_mut_static(&self) -> &'static mut [f64] {
+        std::slice::from_raw_parts_mut(REAL(self.sexp), self.len())
     }
 }
 
@@ -911,12 +922,20 @@ impl<RType: HasLength, RMutability> RObject<RType, i32, RMutability> {
     pub fn slice(&self) -> &[i32] {
         self.slice_engine(unsafe { INTEGER(self.sexp) })
     }
+
+    pub unsafe fn slice_static(&self) -> &'static [i32] {
+        std::slice::from_raw_parts_mut(INTEGER(self.sexp), self.len())
+    }
 }
 
 impl<RType: HasLength> RObject<RType, i32, Mutable> {
     /// Returns a slice of the data structure.
     pub fn slice_mut(&self) -> &mut [i32] {
         self.slice_mut_engine(unsafe { INTEGER(self.sexp) })
+    }
+
+    pub unsafe fn slice_mut_static(self) -> &'static mut [i32] {
+        std::slice::from_raw_parts_mut(INTEGER(self.sexp), self.len())
     }
 }
 
@@ -925,12 +944,20 @@ impl<RType: HasLength, RMutability> RObject<RType, u8, RMutability> {
     pub fn slice(&self) -> &[u8] {
         self.slice_engine(unsafe { RAW(self.sexp) })
     }
+
+    pub unsafe fn slice_static(&self) -> &'static [u8] {
+        std::slice::from_raw_parts_mut(RAW(self.sexp), self.len())
+    }
 }
 
 impl<RType: HasLength> RObject<RType, u8, Mutable> {
     /// Returns a slice of the data structure.
     pub fn slice_mut(&self) -> &mut [u8] {
         self.slice_mut_engine(unsafe { RAW(self.sexp) })
+    }
+
+    pub unsafe fn slice_mut_static(&self) -> &'static mut [u8] {
+        std::slice::from_raw_parts_mut(RAW(self.sexp), self.len())
     }
 }
 
@@ -939,12 +966,20 @@ impl<RType: HasLength, RMutability> RObject<RType, bool, RMutability> {
     pub fn slice(&self) -> &[i32] {
         self.slice_engine(unsafe { LOGICAL(self.sexp) })
     }
+
+    pub unsafe fn slice_static(&self) -> &'static [i32] {
+        std::slice::from_raw_parts_mut(LOGICAL(self.sexp), self.len())
+    }
 }
 
 impl<RType: HasLength> RObject<RType, bool, Mutable> {
     /// Returns a slice of the data structure.
     pub fn slice_mut(&self) -> &mut [i32] {
         self.slice_mut_engine(unsafe { LOGICAL(self.sexp) })
+    }
+
+    pub unsafe fn slice_mut_static(&self) -> &'static mut [i32] {
+        std::slice::from_raw_parts_mut(LOGICAL(self.sexp), self.len())
     }
 }
 
@@ -1590,11 +1625,25 @@ impl<RMutability> RObject<ExternalPtr, (), RMutability> {
         }
     }
 
+    pub unsafe fn decode_as_ref_static<T>(&self) -> &'static T {
+        unsafe {
+            let ptr = R_ExternalPtrAddr(self.sexp) as *mut T;
+            ptr.as_ref().unwrap()
+        }
+    }
+
     /// Obtain a mutable reference to a Rust object from an R external pointer.
     ///
     /// This method obtained a mutable reference to a Rust object from an R external pointer created by [`Self::as_external_ptr`].
     ///
     pub fn decode_as_mut<T>(&mut self) -> &mut T {
+        unsafe {
+            let ptr = R_ExternalPtrAddr(self.sexp) as *mut T;
+            ptr.as_mut().unwrap()
+        }
+    }
+
+    pub unsafe fn decode_as_mut_static<T>(&mut self) -> &'static mut T {
         unsafe {
             let ptr = R_ExternalPtrAddr(self.sexp) as *mut T;
             ptr.as_mut().unwrap()
