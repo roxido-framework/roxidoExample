@@ -15,7 +15,7 @@ fn convolve2(a: RObject, b: RObject) -> RObject {
         .stop_str("'b' not a vector.")
         .to_mode_double(pc);
     let r = R::new_vector_double(a.len() + b.len() - 1, pc);
-    let ab = r.slice();
+    let ab = r.slice_mut();
     for abi in ab.iter_mut() {
         *abi = 0.0;
     }
@@ -54,7 +54,7 @@ fn zero(f: RObject, guesses: RObject, tol: RObject) -> RObject {
         stop!("'tol' must be a strictly positive value.");
     }
     let x_rval = R::new_vector_double(1, pc);
-    let x_slice = x_rval.slice();
+    let x_slice = x_rval.slice_mut();
     let mut g = |x: f64| {
         x_slice[0] = x;
         let Ok(fx) = f.call1(x_rval, pc) else {
