@@ -53,7 +53,7 @@ fn zero(f: RObject, guesses: RObject, tol: RObject) -> RObject {
     if !tol.is_finite() || tol <= 0.0 {
         stop!("'tol' must be a strictly positive value.");
     }
-    let x_rval = R::new_vector_double(1, pc);
+    let mut x_rval = R::new_vector_double(1, pc);
     let mut g = |x: f64| {
         let _ = x_rval.set(0, x);
         let Ok(fx) = f.call1(x_rval, pc) else {

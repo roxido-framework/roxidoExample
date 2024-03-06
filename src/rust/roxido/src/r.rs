@@ -210,7 +210,7 @@ impl R {
     /// This does *not* throw an error.  To throw an R error, simply use `stop!`.
     ///
     pub fn new_error(message: &str, pc: &mut Pc) -> RObject<Vector, List, Mutable> {
-        let list = Self::new_list(2, pc);
+        let mut list = Self::new_list(2, pc);
         let _ = list.set(0, message.to_r(pc));
         let _ = list.set(1, Self::null());
         let _ = list.set_names(["message", "calls"].to_r(pc));
@@ -751,7 +751,7 @@ impl<RType, RMode, RMutability> RObject<RType, RMode, RMutability> {
 
 impl<RType, RMode> RObject<RType, RMode, Mutable> {
     /// Set the class or classes of the data for an RObject.
-    pub fn set_class<U>(&self, names: RObject<Vector, Character, U>) {
+    pub fn set_class<U>(&mut self, names: RObject<Vector, Character, U>) {
         unsafe {
             Rf_classgets(self.sexp, names.sexp);
         }
@@ -759,7 +759,7 @@ impl<RType, RMode> RObject<RType, RMode, Mutable> {
 
     /// Set an attribute.
     pub fn set_attribute<RMutabilityWhich, RTypeValue, RModeValue, RMutabilityValue>(
-        &self,
+        &mut self,
         which: RObject<Symbol, (), RMutabilityWhich>,
         value: RObject<RTypeValue, RModeValue, RMutabilityValue>,
     ) {
@@ -1050,7 +1050,7 @@ impl<RMode, RMutability> RObject<Matrix, RMode, RMutability> {
 
     /// Transpose the matrix.
     pub fn transpose(&self, pc: &mut Pc) -> RObject<Matrix, RMode, Mutable> {
-        let transposed = self.duplicate(pc);
+        let mut transposed = self.duplicate(pc);
         let mut dim: RObject<Vector, i32, Mutable> =
             self.get_attribute(R::symbol_dim()).duplicate(pc).convert();
         let slice = dim.slice_mut();
@@ -1194,7 +1194,7 @@ impl<RMode, RMutability> RObject<Vector, RMode, RMutability> {
 
 impl<RMode> RObject<Vector, RMode, Mutable> {
     fn set_engine<T>(
-        &self,
+        &mut self,
         index: usize,
         value: T,
         f: unsafe extern "C" fn(SEXP, isize, T),
@@ -1211,7 +1211,7 @@ impl<RMode> RObject<Vector, RMode, Mutable> {
 impl<RMode> RObject<Vector, RMode, Mutable> {
     /// Set names of values in a Vector.
     pub fn set_names<RMutability>(
-        &self,
+        &mut self,
         names: RObject<Vector, Character, RMutability>,
     ) -> Result<(), &'static str> {
         if unsafe { Rf_length(names.sexp) != Rf_length(self.sexp) } {
@@ -1233,7 +1233,7 @@ impl<RMutability> RObject<Vector, f64, RMutability> {
 
 impl RObject<Vector, f64, Mutable> {
     /// Set the value at a certain index in an f64 Vector.
-    pub fn set(&self, index: usize, value: f64) -> Result<(), &'static str> {
+    pub fn set(&mut self, index: usize, value: f64) -> Result<(), &'static str> {
         self.set_engine(index, value, SET_REAL_ELT)
     }
 }
@@ -1247,7 +1247,7 @@ impl<RMutability> RObject<Vector, i32, RMutability> {
 
 impl RObject<Vector, i32, Mutable> {
     /// Set the value at a certain index in an i32 Vector.
-    pub fn set(&self, index: usize, value: i32) -> Result<(), &'static str> {
+    pub fn set(&mut self, index: usize, value: i32) -> Result<(), &'static str> {
         self.set_engine(index, value, SET_INTEGER_ELT)
     }
 }
@@ -1261,7 +1261,7 @@ impl<RMutability> RObject<Vector, u8, RMutability> {
 
 impl RObject<Vector, u8, Mutable> {
     /// Set the value at a certain index in a u8 Vector.
-    pub fn set(&self, index: usize, value: u8) -> Result<(), &'static str> {
+    pub fn set(&mut self, index: usize, value: u8) -> Result<(), &'static str> {
         self.set_engine(index, value, SET_RAW_ELT)
     }
 }
@@ -1280,7 +1280,7 @@ impl<RMutability> RObject<Vector, bool, RMutability> {
 
 impl RObject<Vector, bool, Mutable> {
     /// Set the value at a certain index in a logical Vector.
-    pub fn set(&self, index: usize, value: bool) -> Result<(), &'static str> {
+    pub fn set(&mut self, index: usize, value: bool) -> Result<(), &'static str> {
         let value = if value {
             Rboolean_TRUE as i32
         } else {
@@ -1290,7 +1290,7 @@ impl RObject<Vector, bool, Mutable> {
     }
 
     /// Set the value at certain index in a logical Vector with an i32.
-    pub fn set_i32(&self, index: usize, value: i32) -> Result<(), &'static str> {
+    pub fn set_i32(&mut self, index: usize, value: i32) -> Result<(), &'static str> {
         let value = if value != 0 {
             Rboolean_TRUE as i32
         } else {
@@ -1315,7 +1315,7 @@ impl<RMutability> RObject<Vector, Character, RMutability> {
 
 impl RObject<Vector, Character, Mutable> {
     /// Set the value at a certain index in a character Vector.
-    pub fn set(&self, index: usize, value: &str) -> Result<(), &'static str> {
+    pub fn set(&mut self, index: usize, value: &str) -> Result<(), &'static str> {
         unsafe {
             let value = Rf_mkCharLenCE(
                 value.as_ptr() as *const c_char,
@@ -1327,7 +1327,7 @@ impl RObject<Vector, Character, Mutable> {
     }
 
     /// Set the value at a certain index in a character Vector to NA.
-    pub fn set_na(&self, index: usize) {
+    pub fn set_na(&mut self, index: usize) {
         unsafe {
             SET_STRING_ELT(self.sexp, index.try_into().unwrap(), R_NaString);
         }
@@ -1423,7 +1423,7 @@ impl<RMutability> RObject<Vector, List, RMutability> {
 impl RObject<Vector, List, Mutable> {
     /// Set the value at a certain index in a List.
     pub fn set<RType, RMode, RMutability>(
-        &self,
+        &mut self,
         index: usize,
         value: RObject<RType, RMode, RMutability>,
     ) -> Result<(), &'static str> {
@@ -1437,7 +1437,7 @@ impl RObject<Vector, List, Mutable> {
 
     /// Convert a List to a DataFrame.
     pub fn to_data_frame<U1, U2>(
-        &self,
+        &mut self,
         names: RObject<Vector, Character, U1>,
         rownames: RObject<Vector, Character, U2>,
         pc: &mut Pc,
@@ -1483,7 +1483,7 @@ impl<RMutability> RObject<Vector, DataFrame, RMutability> {
 impl RObject<Vector, DataFrame, Mutable> {
     /// Set the value at a certain index in a DataFrame.
     pub fn set<RType, RMode, RMutability>(
-        &self,
+        &mut self,
         index: usize,
         value: RObject<RType, RMode, RMutability>,
     ) -> Result<(), &'static str> {
@@ -1492,7 +1492,7 @@ impl RObject<Vector, DataFrame, Mutable> {
 
     /// Set the row names of a DataFrame.
     pub fn set_rownames<RMutability>(
-        &self,
+        &mut self,
         rownames: RObject<Vector, Character, RMutability>,
     ) -> Result<(), &'static str> {
         if unsafe { Rf_length(rownames.sexp) != Rf_length(self.sexp) } {
@@ -1516,7 +1516,10 @@ impl<RMode, RMutability> RObject<Matrix, RMode, RMutability> {
     }
 
     /// Set the dimnames of a matrix.
-    pub fn set_dimnames<RMutabilityArg>(&self, dimnames: RObject<Vector, List, RMutabilityArg>) -> Result<(), &'static str> {
+    pub fn set_dimnames<RMutabilityArg>(
+        &mut self,
+        dimnames: RObject<Vector, List, RMutabilityArg>,
+    ) -> Result<(), &'static str> {
         if dimnames.len() != 2 {
             return Err("Length should be two");
         }
@@ -1553,7 +1556,7 @@ impl<RMutability> RObject<Matrix, f64, RMutability> {
 
 impl RObject<Matrix, f64, Mutable> {
     /// Set the value at a certain index in a double Matrix.
-    pub fn set(&self, index: (usize, usize), value: f64) -> Result<(), &'static str> {
+    pub fn set(&mut self, index: (usize, usize), value: f64) -> Result<(), &'static str> {
         self.convert::<Vector, f64, Mutable>()
             .set(self.index(index), value)
     }
@@ -1569,7 +1572,7 @@ impl<RMutability> RObject<Matrix, i32, RMutability> {
 
 impl RObject<Matrix, i32, Mutable> {
     /// Set the value at a certain index in an integer Matrix.
-    pub fn set(&self, index: (usize, usize), value: i32) -> Result<(), &'static str> {
+    pub fn set(&mut self, index: (usize, usize), value: i32) -> Result<(), &'static str> {
         self.convert::<Vector, i32, Mutable>()
             .set(self.index(index), value)
     }
@@ -1585,7 +1588,7 @@ impl<RMutability> RObject<Matrix, u8, RMutability> {
 
 impl RObject<Matrix, u8, Mutable> {
     /// Set the value at a certain index in a raw Matrix.
-    pub fn set(&self, index: (usize, usize), value: u8) -> Result<(), &'static str> {
+    pub fn set(&mut self, index: (usize, usize), value: u8) -> Result<(), &'static str> {
         self.convert::<Vector, u8, Mutable>()
             .set(self.index(index), value)
     }
@@ -1607,13 +1610,13 @@ impl<RMutability> RObject<Matrix, bool, RMutability> {
 
 impl RObject<Matrix, bool, Mutable> {
     /// Set the value at a certain index in a logical Matrix.
-    pub fn set(&self, index: (usize, usize), value: bool) -> Result<(), &'static str> {
+    pub fn set(&mut self, index: (usize, usize), value: bool) -> Result<(), &'static str> {
         self.convert::<Vector, bool, Mutable>()
             .set(self.index(index), value)
     }
 
     /// Set the value at a certain index in a logical Matrix an an i32.
-    pub fn set_i32(&self, index: (usize, usize), value: i32) -> Result<(), &'static str> {
+    pub fn set_i32(&mut self, index: (usize, usize), value: i32) -> Result<(), &'static str> {
         self.convert::<Vector, bool, Mutable>()
             .set_i32(self.index(index), value)
     }
@@ -1630,7 +1633,7 @@ impl<RMutability> RObject<Matrix, Character, RMutability> {
 impl RObject<Matrix, Character, Mutable> {
     /// Set the value at a certain index in a character Matrix.
     pub fn set<RType, RMode>(
-        &self,
+        &mut self,
         index: (usize, usize),
         value: &str,
     ) -> Result<(), &'static str> {
@@ -2117,7 +2120,7 @@ impl<const N: usize> ToR1<Vector, Character> for [&str; N] {
 
 impl ToR1<Vector, Character> for &[&str] {
     fn to_r(&self, pc: &mut Pc) -> RObject<Vector, Character, Mutable> {
-        let result = R::new_vector_character(self.len(), pc);
+        let mut result = R::new_vector_character(self.len(), pc);
         for (index, s) in self.iter().enumerate() {
             let _ = result.set(index, s);
         }
@@ -2127,7 +2130,7 @@ impl ToR1<Vector, Character> for &[&str] {
 
 impl ToR1<Vector, Character> for &mut [&str] {
     fn to_r(&self, pc: &mut Pc) -> RObject<Vector, Character, Mutable> {
-        let result = R::new_vector_character(self.len(), pc);
+        let mut result = R::new_vector_character(self.len(), pc);
         for (index, s) in self.iter().enumerate() {
             let _ = result.set(index, s);
         }
