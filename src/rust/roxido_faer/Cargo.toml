@@ -7,4 +7,4 @@ edition = "2021"
 
 [dependencies]
 roxido = { path = "../roxido" }
-faer-core = "0.16"
+faer = "0.17"

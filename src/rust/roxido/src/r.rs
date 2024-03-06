@@ -383,10 +383,7 @@ impl<RType, RMode, RMutability> Copy for RObject<RType, RMode, RMutability> {}
 
 impl<RType, RMode, RMutability> Clone for RObject<RType, RMode, RMutability> {
     fn clone(&self) -> Self {
-        RObject {
-            sexp: self.sexp,
-            rtype: self.rtype,
-        }
+        *self
     }
 }
 
@@ -400,7 +397,11 @@ impl<RType, RMode, RMutability> RObject<RType, RMode, RMutability> {
         self.convert()
     }
 
-    /// Recharacterize an RObject<RType, RMode, RMutability> as an RObject (i.e., an RObject<AnyType, Unknown, Immutable>).
+    /// Recharacterize an RObject as an mutable RObject.
+    ///
+    /// # Safety
+    /// Using this function to modify an object may violate R's convention that "changing the value of
+    /// a supplied argument within a function will not affect the value of the variable in the calling frame."
     pub unsafe fn as_mutable(&self) -> RObject<RType, RMode, Mutable> {
         self.convert()
     }
@@ -757,9 +758,9 @@ impl<RType, RMode> RObject<RType, RMode, Mutable> {
     }
 
     /// Set an attribute.
-    pub fn set_attribute<RTypeValue, RModeValue, RMutabilityValue, U>(
+    pub fn set_attribute<RMutabilityWhich, RTypeValue, RModeValue, RMutabilityValue>(
         &self,
-        which: RObject<Symbol, (), U>,
+        which: RObject<Symbol, (), RMutabilityWhich>,
         value: RObject<RTypeValue, RModeValue, RMutabilityValue>,
     ) {
         unsafe {
@@ -768,7 +769,7 @@ impl<RType, RMode> RObject<RType, RMode, Mutable> {
     }
 }
 
-impl<S: HasLength, RMode, RMutability> RObject<S, RMode, RMutability> {
+impl<RType: HasLength, RMode, RMutability> RObject<RType, RMode, RMutability> {
     /// Returns the length of the RObject.
     pub fn len(&self) -> usize {
         let len = unsafe { Rf_xlength(self.sexp) };
@@ -787,7 +788,7 @@ impl<S: HasLength, RMode, RMutability> RObject<S, RMode, RMutability> {
 }
 
 impl<RType: HasLength, RMode: Atomic> RObject<RType, RMode, Mutable> {
-    fn slice_mut_engine<U>(&self, data: *mut U) -> &mut [U] {
+    fn slice_mut_engine<U>(&mut self, data: *mut U) -> &mut [U] {
         unsafe { std::slice::from_raw_parts_mut(data, self.len()) }
     }
 }
@@ -901,17 +902,29 @@ impl<RType: HasLength, RMutability> RObject<RType, f64, RMutability> {
         self.slice_engine(unsafe { REAL(self.sexp) })
     }
 
+    /// Returns a slice of the data structure with a static lifetime.
+    ///
+    /// # Safety
+    ///
+    /// Despite the use of a static lifetime here, the reference is only valid as long as R's
+    /// garbage collector has not reclaimed the underlying object's memory.
     pub unsafe fn slice_static(&self) -> &'static [f64] {
         std::slice::from_raw_parts_mut(REAL(self.sexp), self.len())
     }
 }
 
 impl<RType: HasLength> RObject<RType, f64, Mutable> {
-    /// Returns a slice of the data structure.
-    pub fn slice_mut(&self) -> &mut [f64] {
+    /// Returns a mutable slice of the data structure.
+    pub fn slice_mut(&mut self) -> &mut [f64] {
         self.slice_mut_engine(unsafe { REAL(self.sexp) })
     }
 
+    /// Returns a mutable slice of the data structure with a static lifetime.
+    ///
+    /// # Safety
+    ///
+    /// Despite the use of a static lifetime here, the reference is only valid as long as R's
+    /// garbage collector has not reclaimed the underlying object's memory.
     pub unsafe fn slice_mut_static(&self) -> &'static mut [f64] {
         std::slice::from_raw_parts_mut(REAL(self.sexp), self.len())
     }
@@ -923,17 +936,29 @@ impl<RType: HasLength, RMutability> RObject<RType, i32, RMutability> {
         self.slice_engine(unsafe { INTEGER(self.sexp) })
     }
 
+    /// Returns a slice of the data structure, pretending a static lifetime.
+    ///
+    /// # Safety
+    ///
+    /// Despite the use of a static lifetime here, the reference is only valid as long as R's
+    /// garbage collector has not reclaimed the underlying object's memory.
     pub unsafe fn slice_static(&self) -> &'static [i32] {
         std::slice::from_raw_parts_mut(INTEGER(self.sexp), self.len())
     }
 }
 
 impl<RType: HasLength> RObject<RType, i32, Mutable> {
-    /// Returns a slice of the data structure.
-    pub fn slice_mut(&self) -> &mut [i32] {
+    /// Returns a mutable slice of the data structure.
+    pub fn slice_mut(&mut self) -> &mut [i32] {
         self.slice_mut_engine(unsafe { INTEGER(self.sexp) })
     }
 
+    /// Returns a mutable slice of the data structure, pretending a static lifetime.
+    ///
+    /// # Safety
+    ///
+    /// Despite the use of a static lifetime here, the reference is only valid as long as R's
+    /// garbage collector has not reclaimed the underlying object's memory.
     pub unsafe fn slice_mut_static(self) -> &'static mut [i32] {
         std::slice::from_raw_parts_mut(INTEGER(self.sexp), self.len())
     }
@@ -945,17 +970,29 @@ impl<RType: HasLength, RMutability> RObject<RType, u8, RMutability> {
         self.slice_engine(unsafe { RAW(self.sexp) })
     }
 
+    /// Returns a slice of the data structure, pretending a static lifetime.
+    ///
+    /// # Safety
+    ///
+    /// Despite the use of a static lifetime here, the reference is only valid as long as R's
+    /// garbage collector has not reclaimed the underlying object's memory.
     pub unsafe fn slice_static(&self) -> &'static [u8] {
         std::slice::from_raw_parts_mut(RAW(self.sexp), self.len())
     }
 }
 
 impl<RType: HasLength> RObject<RType, u8, Mutable> {
-    /// Returns a slice of the data structure.
-    pub fn slice_mut(&self) -> &mut [u8] {
+    /// Returns a mutable slice of the data structure.
+    pub fn slice_mut(&mut self) -> &mut [u8] {
         self.slice_mut_engine(unsafe { RAW(self.sexp) })
     }
 
+    /// Returns a mutable slice of the data structure, pretending a static lifetime.
+    ///
+    /// # Safety
+    ///
+    /// Despite the use of a static lifetime here, the reference is only valid as long as R's
+    /// garbage collector has not reclaimed the underlying object's memory.
     pub unsafe fn slice_mut_static(&self) -> &'static mut [u8] {
         std::slice::from_raw_parts_mut(RAW(self.sexp), self.len())
     }
@@ -967,17 +1004,29 @@ impl<RType: HasLength, RMutability> RObject<RType, bool, RMutability> {
         self.slice_engine(unsafe { LOGICAL(self.sexp) })
     }
 
+    /// Returns a slice of the data structure, pretending a static lifetime.
+    ///
+    /// # Safety
+    ///
+    /// Despite the use of a static lifetime here, the reference is only valid as long as R's
+    /// garbage collector has not reclaimed the underlying object's memory.
     pub unsafe fn slice_static(&self) -> &'static [i32] {
         std::slice::from_raw_parts_mut(LOGICAL(self.sexp), self.len())
     }
 }
 
 impl<RType: HasLength> RObject<RType, bool, Mutable> {
-    /// Returns a slice of the data structure.
-    pub fn slice_mut(&self) -> &mut [i32] {
+    /// Returns a mutable slice of the data structure.
+    pub fn slice_mut(&mut self) -> &mut [i32] {
         self.slice_mut_engine(unsafe { LOGICAL(self.sexp) })
     }
 
+    /// Returns a mutable slice of the data structure, pretending a static lifetime.
+    ///
+    /// # Safety
+    ///
+    /// Despite the use of a static lifetime here, the reference is only valid as long as R's
+    /// garbage collector has not reclaimed the underlying object's memory.
     pub unsafe fn slice_mut_static(&self) -> &'static mut [i32] {
         std::slice::from_raw_parts_mut(LOGICAL(self.sexp), self.len())
     }
@@ -1002,7 +1051,7 @@ impl<RMode, RMutability> RObject<Matrix, RMode, RMutability> {
     /// Transpose the matrix.
     pub fn transpose(&self, pc: &mut Pc) -> RObject<Matrix, RMode, Mutable> {
         let transposed = self.duplicate(pc);
-        let dim: RObject<Vector, i32, Mutable> =
+        let mut dim: RObject<Vector, i32, Mutable> =
             self.get_attribute(R::symbol_dim()).duplicate(pc).convert();
         let slice = dim.slice_mut();
         slice.swap(0, 1);
@@ -1293,7 +1342,7 @@ pub struct RListMap<'a, RMutability> {
 }
 
 impl<RMutability> RListMap<'_, RMutability> {
-    /// Find an RObject in the map based on its name.
+    /// Find an RObject in the list based on its name.
     pub fn get(&mut self, name: &str) -> Result<RObject, String> {
         let Some(index) = self.map.get(name) else {
             return Err(format!("'{}' not found", name));
@@ -1467,7 +1516,7 @@ impl<RMode, RMutability> RObject<Matrix, RMode, RMutability> {
     }
 
     /// Set the dimnames of a matrix.
-    pub fn set_dimnames<U>(&self, dimnames: RObject<Vector, List, U>) -> Result<(), &'static str> {
+    pub fn set_dimnames<RMutabilityArg>(&self, dimnames: RObject<Vector, List, RMutabilityArg>) -> Result<(), &'static str> {
         if dimnames.len() != 2 {
             return Err("Length should be two");
         }
@@ -1616,7 +1665,7 @@ impl<RMutability> RObject<ExternalPtr, (), RMutability> {
 
     /// Obtain a reference to a Rust object from an R external pointer.
     ///
-    /// This method obtained a reference to a Rust object from an R external pointer created by [`Self::as_external_ptr`].
+    /// This method obtains a reference to a Rust object from an R external pointer created by [`Self::as_external_ptr`].
     ///
     pub fn decode_as_ref<T>(&self) -> &T {
         unsafe {
@@ -1625,6 +1674,14 @@ impl<RMutability> RObject<ExternalPtr, (), RMutability> {
         }
     }
 
+    /// Obtain a reference to a Rust object from an R external pointer, pretending a static lifetime.
+    ///
+    /// This method obtains a reference to a Rust object from an R external pointer created by [`Self::as_external_ptr`].
+    ///
+    /// # Safety
+    ///
+    /// Despite the use of a static lifetime here, the reference is only valid as long as R's
+    /// garbage collector has not reclaimed the underlying object's memory.
     pub unsafe fn decode_as_ref_static<T>(&self) -> &'static T {
         let ptr = R_ExternalPtrAddr(self.sexp) as *mut T;
         ptr.as_ref().unwrap()
@@ -1632,7 +1689,7 @@ impl<RMutability> RObject<ExternalPtr, (), RMutability> {
 
     /// Obtain a mutable reference to a Rust object from an R external pointer.
     ///
-    /// This method obtained a mutable reference to a Rust object from an R external pointer created by [`Self::as_external_ptr`].
+    /// This method obtains a mutable reference to a Rust object from an R external pointer created by [`Self::as_external_ptr`].
     ///
     pub fn decode_as_mut<T>(&mut self) -> &mut T {
         unsafe {
@@ -1641,6 +1698,14 @@ impl<RMutability> RObject<ExternalPtr, (), RMutability> {
         }
     }
 
+    /// Obtain a mutable reference to a Rust object from an R external pointer, pretending a static lifetime.
+    ///
+    /// This method obtains a mutable reference to a Rust object from an R external pointer created by [`Self::as_external_ptr`].
+    ///
+    /// # Safety
+    ///
+    /// Despite the use of a static lifetime here, the reference is only valid as long as R's
+    /// garbage collector has not reclaimed the underlying object's memory.
     pub unsafe fn decode_as_mut_static<T>(&mut self) -> &'static mut T {
         let ptr = R_ExternalPtrAddr(self.sexp) as *mut T;
         ptr.as_mut().unwrap()
@@ -1727,7 +1792,7 @@ impl<const N: usize> ToR1<Vector, f64> for [f64; N] {
 
 impl ToR1<Vector, f64> for &[f64] {
     fn to_r(&self, pc: &mut Pc) -> RObject<Vector, f64, Mutable> {
-        let result = R::new_vector_double(self.len(), pc);
+        let mut result = R::new_vector_double(self.len(), pc);
         let slice = result.slice_mut();
         slice.copy_from_slice(self);
         result
@@ -1736,7 +1801,7 @@ impl ToR1<Vector, f64> for &[f64] {
 
 impl ToR1<Vector, f64> for &mut [f64] {
     fn to_r(&self, pc: &mut Pc) -> RObject<Vector, f64, Mutable> {
-        let result = R::new_vector_double(self.len(), pc);
+        let mut result = R::new_vector_double(self.len(), pc);
         let slice = result.slice_mut();
         slice.copy_from_slice(self);
         result
@@ -1745,7 +1810,7 @@ impl ToR1<Vector, f64> for &mut [f64] {
 
 impl<'a, T: IntoIterator<Item = &'a f64> + ExactSizeIterator> ToR2<Vector, f64> for T {
     fn to_r(self, pc: &mut Pc) -> RObject<Vector, f64, Mutable> {
-        let result = R::new_vector_double(self.len(), pc);
+        let mut result = R::new_vector_double(self.len(), pc);
         let slice = result.slice_mut();
         for (to, from) in slice.iter_mut().zip(self) {
             *to = *from;
@@ -1756,7 +1821,7 @@ impl<'a, T: IntoIterator<Item = &'a f64> + ExactSizeIterator> ToR2<Vector, f64> 
 
 impl<'a, T: IntoIterator<Item = &'a mut f64> + ExactSizeIterator> ToR3<Vector, f64> for T {
     fn to_r(self, pc: &mut Pc) -> RObject<Vector, f64, Mutable> {
-        let result = R::new_vector_double(self.len(), pc);
+        let mut result = R::new_vector_double(self.len(), pc);
         let slice = result.slice_mut();
         for (to, from) in slice.iter_mut().zip(self) {
             *to = *from;
@@ -1767,7 +1832,7 @@ impl<'a, T: IntoIterator<Item = &'a mut f64> + ExactSizeIterator> ToR3<Vector, f
 
 impl<T: IntoIterator<Item = f64> + ExactSizeIterator> ToR4<Vector, f64> for T {
     fn to_r(self, pc: &mut Pc) -> RObject<Vector, f64, Mutable> {
-        let result = R::new_vector_double(self.len(), pc);
+        let mut result = R::new_vector_double(self.len(), pc);
         let slice = result.slice_mut();
         for (to, from) in slice.iter_mut().zip(self) {
             *to = from;
@@ -1792,7 +1857,7 @@ impl<const N: usize> ToR1<Vector, i32> for [i32; N] {
 
 impl ToR1<Vector, i32> for &[i32] {
     fn to_r(&self, pc: &mut Pc) -> RObject<Vector, i32, Mutable> {
-        let result = R::new_vector_integer(self.len(), pc);
+        let mut result = R::new_vector_integer(self.len(), pc);
         let slice = result.slice_mut();
         slice.copy_from_slice(self);
         result
@@ -1801,7 +1866,7 @@ impl ToR1<Vector, i32> for &[i32] {
 
 impl ToR1<Vector, i32> for &mut [i32] {
     fn to_r(&self, pc: &mut Pc) -> RObject<Vector, i32, Mutable> {
-        let result = R::new_vector_integer(self.len(), pc);
+        let mut result = R::new_vector_integer(self.len(), pc);
         let slice = result.slice_mut();
         slice.copy_from_slice(self);
         result
@@ -1810,7 +1875,7 @@ impl ToR1<Vector, i32> for &mut [i32] {
 
 impl<'a, T: IntoIterator<Item = &'a i32> + ExactSizeIterator> ToR2<Vector, i32> for T {
     fn to_r(self, pc: &mut Pc) -> RObject<Vector, i32, Mutable> {
-        let result = R::new_vector_integer(self.len(), pc);
+        let mut result = R::new_vector_integer(self.len(), pc);
         let slice = result.slice_mut();
         for (to, from) in slice.iter_mut().zip(self) {
             *to = *from;
@@ -1821,7 +1886,7 @@ impl<'a, T: IntoIterator<Item = &'a i32> + ExactSizeIterator> ToR2<Vector, i32> 
 
 impl<'a, T: IntoIterator<Item = &'a mut i32> + ExactSizeIterator> ToR3<Vector, i32> for T {
     fn to_r(self, pc: &mut Pc) -> RObject<Vector, i32, Mutable> {
-        let result = R::new_vector_integer(self.len(), pc);
+        let mut result = R::new_vector_integer(self.len(), pc);
         let slice = result.slice_mut();
         for (to, from) in slice.iter_mut().zip(self) {
             *to = *from;
@@ -1832,7 +1897,7 @@ impl<'a, T: IntoIterator<Item = &'a mut i32> + ExactSizeIterator> ToR3<Vector, i
 
 impl<T: IntoIterator<Item = i32> + ExactSizeIterator> ToR4<Vector, i32> for T {
     fn to_r(self, pc: &mut Pc) -> RObject<Vector, i32, Mutable> {
-        let result = R::new_vector_integer(self.len(), pc);
+        let mut result = R::new_vector_integer(self.len(), pc);
         let slice = result.slice_mut();
         for (to, from) in slice.iter_mut().zip(self) {
             *to = from;
@@ -1857,7 +1922,7 @@ impl<const N: usize> ToR1<Vector, i32> for [usize; N] {
 
 impl ToR1<Vector, i32> for &[usize] {
     fn to_r(&self, pc: &mut Pc) -> RObject<Vector, i32, Mutable> {
-        let result = R::new_vector_integer(self.len(), pc);
+        let mut result = R::new_vector_integer(self.len(), pc);
         let slice = result.slice_mut();
         for (i, j) in slice.iter_mut().zip(self.iter()) {
             *i = (*j).try_into().unwrap();
@@ -1868,7 +1933,7 @@ impl ToR1<Vector, i32> for &[usize] {
 
 impl ToR1<Vector, i32> for &mut [usize] {
     fn to_r(&self, pc: &mut Pc) -> RObject<Vector, i32, Mutable> {
-        let result = R::new_vector_integer(self.len(), pc);
+        let mut result = R::new_vector_integer(self.len(), pc);
         let slice = result.slice_mut();
         for (i, j) in slice.iter_mut().zip(self.iter()) {
             *i = (*j).try_into().unwrap();
@@ -1893,7 +1958,7 @@ impl<const N: usize> ToR1<Vector, u8> for [u8; N] {
 
 impl ToR1<Vector, u8> for &[u8] {
     fn to_r(&self, pc: &mut Pc) -> RObject<Vector, u8, Mutable> {
-        let result = R::new_vector_raw(self.len(), pc);
+        let mut result = R::new_vector_raw(self.len(), pc);
         let slice = result.slice_mut();
         slice.copy_from_slice(self);
         result
@@ -1902,7 +1967,7 @@ impl ToR1<Vector, u8> for &[u8] {
 
 impl ToR1<Vector, u8> for &mut [u8] {
     fn to_r(&self, pc: &mut Pc) -> RObject<Vector, u8, Mutable> {
-        let result = R::new_vector_raw(self.len(), pc);
+        let mut result = R::new_vector_raw(self.len(), pc);
         let slice = result.slice_mut();
         slice.copy_from_slice(self);
         result
@@ -1911,7 +1976,7 @@ impl ToR1<Vector, u8> for &mut [u8] {
 
 impl<'a, T: IntoIterator<Item = &'a u8> + ExactSizeIterator> ToR2<Vector, u8> for T {
     fn to_r(self, pc: &mut Pc) -> RObject<Vector, u8, Mutable> {
-        let result = R::new_vector_raw(self.len(), pc);
+        let mut result = R::new_vector_raw(self.len(), pc);
         let slice = result.slice_mut();
         for (to, from) in slice.iter_mut().zip(self) {
             *to = *from;
@@ -1922,7 +1987,7 @@ impl<'a, T: IntoIterator<Item = &'a u8> + ExactSizeIterator> ToR2<Vector, u8> fo
 
 impl<'a, T: IntoIterator<Item = &'a mut u8> + ExactSizeIterator> ToR3<Vector, u8> for T {
     fn to_r(self, pc: &mut Pc) -> RObject<Vector, u8, Mutable> {
-        let result = R::new_vector_raw(self.len(), pc);
+        let mut result = R::new_vector_raw(self.len(), pc);
         let slice = result.slice_mut();
         for (to, from) in slice.iter_mut().zip(self) {
             *to = *from;
@@ -1933,7 +1998,7 @@ impl<'a, T: IntoIterator<Item = &'a mut u8> + ExactSizeIterator> ToR3<Vector, u8
 
 impl<T: IntoIterator<Item = u8> + ExactSizeIterator> ToR4<Vector, u8> for T {
     fn to_r(self, pc: &mut Pc) -> RObject<Vector, u8, Mutable> {
-        let result = R::new_vector_raw(self.len(), pc);
+        let mut result = R::new_vector_raw(self.len(), pc);
         let slice = result.slice_mut();
         for (to, from) in slice.iter_mut().zip(self) {
             *to = from;
@@ -1964,10 +2029,10 @@ impl<const N: usize> ToR1<Vector, bool> for [bool; N] {
 
 impl ToR1<Vector, bool> for &[bool] {
     fn to_r(&self, pc: &mut Pc) -> RObject<Vector, bool, Mutable> {
-        let result = R::new_vector_logical(self.len(), pc);
+        let mut result = R::new_vector_logical(self.len(), pc);
         let slice = result.slice_mut();
         for (i, j) in slice.iter_mut().zip(self.iter()) {
-            *i = (*j).try_into().unwrap();
+            *i = (*j).into();
         }
         result
     }
@@ -1975,10 +2040,10 @@ impl ToR1<Vector, bool> for &[bool] {
 
 impl ToR1<Vector, bool> for &mut [bool] {
     fn to_r(&self, pc: &mut Pc) -> RObject<Vector, bool, Mutable> {
-        let result = R::new_vector_logical(self.len(), pc);
+        let mut result = R::new_vector_logical(self.len(), pc);
         let slice = result.slice_mut();
         for (i, j) in slice.iter_mut().zip(self.iter()) {
-            *i = (*j).try_into().unwrap();
+            *i = (*j).into();
         }
         result
     }
@@ -1986,7 +2051,7 @@ impl ToR1<Vector, bool> for &mut [bool] {
 
 impl<'a, T: IntoIterator<Item = &'a bool> + ExactSizeIterator> ToR2<Vector, bool> for T {
     fn to_r(self, pc: &mut Pc) -> RObject<Vector, bool, Mutable> {
-        let result = R::new_vector_logical(self.len(), pc);
+        let mut result = R::new_vector_logical(self.len(), pc);
         let slice = result.slice_mut();
         for (to, from) in slice.iter_mut().zip(self) {
             *to = if *from {
@@ -2001,7 +2066,7 @@ impl<'a, T: IntoIterator<Item = &'a bool> + ExactSizeIterator> ToR2<Vector, bool
 
 impl<'a, T: IntoIterator<Item = &'a mut bool> + ExactSizeIterator> ToR3<Vector, bool> for T {
     fn to_r(self, pc: &mut Pc) -> RObject<Vector, bool, Mutable> {
-        let result = R::new_vector_logical(self.len(), pc);
+        let mut result = R::new_vector_logical(self.len(), pc);
         let slice = result.slice_mut();
         for (to, from) in slice.iter_mut().zip(self) {
             *to = if *from {
@@ -2016,7 +2081,7 @@ impl<'a, T: IntoIterator<Item = &'a mut bool> + ExactSizeIterator> ToR3<Vector, 
 
 impl<T: IntoIterator<Item = bool> + ExactSizeIterator> ToR4<Vector, bool> for T {
     fn to_r(self, pc: &mut Pc) -> RObject<Vector, bool, Mutable> {
-        let result = R::new_vector_logical(self.len(), pc);
+        let mut result = R::new_vector_logical(self.len(), pc);
         let slice = result.slice_mut();
         for (to, from) in slice.iter_mut().zip(self) {
             *to = if from {
