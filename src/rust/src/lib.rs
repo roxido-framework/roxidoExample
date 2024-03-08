@@ -6,14 +6,8 @@ use roxido::*;
 
 #[roxido]
 fn convolve2(a: RObject, b: RObject) -> RObject {
-    let a = a
-        .as_vector()
-        .stop_str("'a' not a vector.")
-        .to_mode_double(pc);
-    let b = b
-        .as_vector()
-        .stop_str("'b' not a vector.")
-        .to_mode_double(pc);
+    let a = a.vector().stop_str("'a' not a vector.").to_double(pc);
+    let b = b.vector().stop_str("'b' not a vector.").to_double(pc);
     let mut r = R::new_vector_double(a.len() + b.len() - 1, pc);
     let ab = r.slice_mut();
     for abi in ab.iter_mut() {
@@ -29,39 +23,29 @@ fn convolve2(a: RObject, b: RObject) -> RObject {
 
 #[roxido]
 fn zero(f: RObject, guesses: RObject, tol: RObject) -> RObject {
-    let f = f.as_function().stop_str("'f' must be a function.");
+    let f = f.function().stop_str("'f' must be a function.");
     let guesses = guesses
-        .as_vector()
+        .vector()
         .stop_str("'guesses' must be a vector.")
-        .to_mode_double(pc);
+        .to_double(pc);
     if guesses.len() != 2 {
         stop!("'guesses' must be a vector of length two.");
-    }
-    let guesses = guesses
-        .as_vector()
-        .stop_str("'guesses' must be a vector.")
-        .as_mode_double()
-        .stop_str("'guess' must have storage mode 'double'.");
-    if guesses.len() != 2 {
-        stop!("'guesses' should be of length two.");
     }
     let (mut x0, mut x1) = {
         let g = guesses.slice();
         (g[0], g[1])
     };
-    let tol = tol.as_f64().stop_str("'tol' should be a numeric scalar.");
+    let tol = tol.f64().stop_str("'tol' should be a numeric scalar.");
     if !tol.is_finite() || tol <= 0.0 {
         stop!("'tol' must be a strictly positive value.");
     }
     let mut x_rval = R::new_vector_double(1, pc);
     let mut g = |x: f64| {
         let _ = x_rval.set(0, x);
-        let Ok(fx) = f.call1(x_rval, pc) else {
+        let Ok(fx) = f.call1(&x_rval, pc) else {
             stop!("Error in function evaluation.");
         };
-        let fx = fx
-            .as_f64()
-            .stop_str("Unexpected return value  from function.");
+        let fx = fx.f64().stop_str("Unexpected return value  from function.");
         if !fx.is_finite() {
             stop!("Non-finite return value from function.");
         }
