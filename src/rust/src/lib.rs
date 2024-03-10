@@ -6,6 +6,26 @@ use roxido::*;
 
 #[roxido]
 fn convolve2(a: RObject, b: RObject) -> RObject {
+    let pc = &Pc2::new();
+    let a = pc.from_robject(&a);
+    let b = pc.from_robject(&b);
+    let a = a.vector().stop_str("'a' not a vector.").to_double(pc);
+    let b = b.vector().stop_str("'b' not a vector.").to_double(pc);
+    let r = pc.new_vector_double(a.len() + b.len() - 1);
+    let ab = r.slice_mut();
+    for abi in ab.iter_mut() {
+        *abi = 0.0;
+    }
+    for (i, ai) in a.slice().iter().enumerate() {
+        for (j, bj) in b.slice().iter().enumerate() {
+            ab[i + j] += ai * bj;
+        }
+    }
+    r.to_robject()
+}
+
+#[roxido]
+fn convolve4(a: RObject, b: RObject) -> RObject {
     let a = a.vector().stop_str("'a' not a vector.").to_double(pc);
     let b = b.vector().stop_str("'b' not a vector.").to_double(pc);
     let mut r = R::new_vector_double(a.len() + b.len() - 1, pc);
