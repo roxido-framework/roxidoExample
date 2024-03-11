@@ -5,30 +5,10 @@ mod registration {
 use roxido::*;
 
 #[roxido]
-fn convolve2(a: RObject, b: RObject) -> RObject {
-    let pc = &Pc2::new();
-    let a = pc.from_robject(&a);
-    let b = pc.from_robject(&b);
+fn convolve2(a: &RObject, b: &RObject) -> &RObject {
     let a = a.vector().stop_str("'a' not a vector.").to_double(pc);
     let b = b.vector().stop_str("'b' not a vector.").to_double(pc);
-    let r = pc.new_vector_double(a.len() + b.len() - 1);
-    let ab = r.slice_mut();
-    for abi in ab.iter_mut() {
-        *abi = 0.0;
-    }
-    for (i, ai) in a.slice().iter().enumerate() {
-        for (j, bj) in b.slice().iter().enumerate() {
-            ab[i + j] += ai * bj;
-        }
-    }
-    r.to_robject()
-}
-
-#[roxido]
-fn convolve4(a: RObject, b: RObject) -> RObject {
-    let a = a.vector().stop_str("'a' not a vector.").to_double(pc);
-    let b = b.vector().stop_str("'b' not a vector.").to_double(pc);
-    let mut r = R::new_vector_double(a.len() + b.len() - 1, pc);
+    let mut r = pc.new_vector_double(a.len() + b.len() - 1);
     let ab = r.slice_mut();
     for abi in ab.iter_mut() {
         *abi = 0.0;
@@ -42,7 +22,7 @@ fn convolve4(a: RObject, b: RObject) -> RObject {
 }
 
 #[roxido]
-fn zero(f: RObject, guesses: RObject, tol: RObject) -> RObject {
+fn zero(f: &RObject, guesses: &RObject, tol: &RObject) -> &RObject {
     let f = f.function().stop_str("'f' must be a function.");
     let guesses = guesses
         .vector()
@@ -59,7 +39,7 @@ fn zero(f: RObject, guesses: RObject, tol: RObject) -> RObject {
     if !tol.is_finite() || tol <= 0.0 {
         stop!("'tol' must be a strictly positive value.");
     }
-    let mut x_rval = R::new_vector_double(1, pc);
+    let mut x_rval = pc.new_vector_double(1);
     let mut g = |x: f64| {
         let _ = x_rval.set(0, x);
         let Ok(fx) = f.call1(&x_rval, pc) else {
@@ -101,7 +81,7 @@ fn zero(f: RObject, guesses: RObject, tol: RObject) -> RObject {
 }
 
 #[roxido]
-fn myrnorm(n: RObject, mean: RObject, sd: RObject) -> RObject {
+fn myrnorm(n: &RObject, mean: &RObject, sd: &RObject) -> &RObject {
     unsafe {
         use rbindings::*;
         use std::convert::TryFrom;

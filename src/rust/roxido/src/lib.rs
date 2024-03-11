@@ -67,4 +67,4 @@ pub use print::*;
 #[doc(hidden)]
 pub use stop::{RStopHelper, UnwrapOrStop};
 
-pub use r::{FromR, Pc2, RObject2, ToR1, ToR2, ToR3, ToR4, R};
+pub use r::{FromR, Pc, RObject, ToR1, ToR2, ToR3, ToR4, R};
