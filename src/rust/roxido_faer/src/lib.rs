@@ -1,5 +1,5 @@
 use faer::MatRef;
-use roxido::r::{Matrix, Mutable};
+use roxido::r::Matrix;
 use roxido::*;
 
 pub trait RMatrix2Faer {
@@ -23,15 +23,15 @@ impl RMatrix2Faer for RObject<Matrix, f64> {
     }
 }
 
-pub trait ToR1<S, T, U> {
-    fn to_r(&self, pc: &mut Pc) -> RObject<S, T, U>;
+pub trait ToR1<'a, RType, RMode> {
+    fn to_r(&self, pc: &'a Pc) -> &'a RObject<RType, RMode>;
 }
 
-impl ToR1<Matrix, f64, Mutable> for MatRef<'_, f64> {
-    fn to_r(&self, pc: &mut Pc) -> RObject<Matrix, f64, Mutable> {
+impl<'a> ToR1<'a, Matrix, f64> for MatRef<'a, f64> {
+    fn to_r(&self, pc: &'a Pc) -> &'a RObject<Matrix, f64> {
         let nr = self.nrows();
         let nc = self.ncols();
-        let mut result = R::new_matrix_double(nr, nc, pc);
+        let result = pc.new_matrix_double(nr, nc);
         for (k, r) in result.slice_mut().iter_mut().enumerate() {
             *r = self.read(k % nr, k / nc);
         }
