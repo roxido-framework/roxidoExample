@@ -201,8 +201,6 @@ fn roxido_fn(options: Vec<NestedMeta>, item_fn: syn::ItemFn) -> TokenStream {
                 }
                 let result = std::panic::catch_unwind(|| {
                     let pc = &mut Pc::new();
-                    // let a = pc.transmute_sexp(a);
-                    // let b = pc.transmute_sexp(b);
                     let mut f = || { #body };
                     to_sexp(f().to_r(pc))
                 });
@@ -238,7 +236,7 @@ fn roxido_fn(options: Vec<NestedMeta>, item_fn: syn::ItemFn) -> TokenStream {
     } else {
         TokenStream::from(quote! {
             #[no_mangle]
-            extern "C" fn #name<'a>(#args) -> crate::rbindings::SEXP {
+            extern "C" fn #name(#args) -> crate::rbindings::SEXP {
                 fn to_sexp<RType, RMode>(x: &RObject<RType, RMode>) -> crate::rbindings::SEXP {
                     unsafe { std::mem::transmute::<&RObject<RType, RMode>, crate::rbindings::SEXP>(x) }
                 }

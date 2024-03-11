@@ -15,8 +15,6 @@ use std::collections::HashMap;
 use std::ffi::{c_char, c_void, CStr};
 use std::marker::PhantomData;
 
-pub struct R {}
-
 pub struct Pc {
     counter: std::cell::RefCell<i32>,
 }
