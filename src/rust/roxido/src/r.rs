@@ -104,23 +104,23 @@ impl Pc {
     }
 
     pub fn transmute_sexp<RTypeTo, RModeTo>(&self, sexp: SEXP) -> &RObject<RTypeTo, RModeTo> {
-        unsafe { std::mem::transmute::<SEXP, &RObject<RTypeTo, RModeTo>>(sexp) }
+        unsafe { &*sexp.cast::<RObject<RTypeTo, RModeTo>>() }
     }
 
-    pub fn transmute_sexp_mut<RTypeTo, RModeTo>(
+    pub fn transmute_sexp_mut<'a, RTypeTo, RModeTo>(
         &self,
         sexp: SEXP,
-    ) -> &mut RObject<RTypeTo, RModeTo> {
-        unsafe { std::mem::transmute::<SEXP, &mut RObject<RTypeTo, RModeTo>>(sexp) }
+    ) -> &'a mut RObject<RTypeTo, RModeTo> {
+        unsafe { &mut *sexp.cast::<RObject<RTypeTo, RModeTo>>() }
     }
 
     pub fn transmute_sexp_static<RTypeTo, RModeTo>(
         sexp: SEXP,
     ) -> &'static RObject<RTypeTo, RModeTo> {
-        unsafe { std::mem::transmute::<SEXP, &RObject<RTypeTo, RModeTo>>(sexp) }
+        unsafe { &*sexp.cast::<RObject<RTypeTo, RModeTo>>() }
     }
 
-    fn new_vector<RMode>(&self, code: u32, length: usize) -> &mut RObject<Vector, RMode> {
+    fn new_vector<'a, RMode>(&self, code: u32, length: usize) -> &'a mut RObject<Vector, RMode> {
         let sexp = self.protect(unsafe { Rf_allocVector(code, length.try_into().unwrap()) });
         self.transmute_sexp_mut(sexp)
     }
@@ -150,12 +150,12 @@ impl Pc {
         self.new_vector(STRSXP, length)
     }
 
-    fn new_matrix<RMode>(
+    fn new_matrix<'a, RMode>(
         &self,
         code: u32,
         nrow: usize,
         ncol: usize,
-    ) -> &mut RObject<Matrix, RMode> {
+    ) -> &'a mut RObject<Matrix, RMode> {
         let sexp = self.protect(unsafe {
             Rf_allocMatrix(code, nrow.try_into().unwrap(), ncol.try_into().unwrap())
         });
@@ -194,13 +194,14 @@ impl Pc {
     // TODO Array
 
     /// Create a new list.
-    pub fn new_list(&self, length: usize) -> &RObject<Vector, List> {
+    pub fn new_list(&self, length: usize) -> &mut RObject<Vector, List> {
         self.new_vector(VECSXP, length)
     }
 
     // TODO New error
 
     /// Define a new symbol.
+    #[allow(clippy::mut_from_ref)]
     pub fn new_symbol(&self, x: &str) -> &mut RObject<Symbol, ()> {
         let sexp = self.protect(unsafe {
             Rf_mkCharLenCE(
@@ -241,8 +242,9 @@ impl Pc {
     /// Move Rust object to an R external pointer.
     ///
     /// This *method* moves a Rust object to an R external pointer and then, as far as Rust is concerned, leaks the memory.
-    /// Thus the programmer is then responsible to release the memory by calling [`RObject::decode_as_val`].
+    /// Thus the programmer is then responsible to release the memory by calling [`RObject::decode_val`].
     ///
+    #[allow(clippy::mut_from_ref)]
     pub fn encode<T, RType, RMode>(
         &self,
         x: T,
@@ -368,11 +370,11 @@ pub struct RObject<RType = AnyType, RMode = Unknown> {
 
 impl<RType, RMode> RObject<RType, RMode> {
     pub fn sexp(&self) -> SEXP {
-        unsafe { std::mem::transmute::<&Self, SEXP>(&self) }
+        self as *const RObject<RType, RMode> as SEXP
     }
 
-    fn wrap<RTypeTo, RModeTo>(&self, sexp: SEXP) -> &RObject<RTypeTo, RModeTo> {
-        unsafe { std::mem::transmute::<SEXP, &RObject<RTypeTo, RModeTo>>(sexp) }
+    fn transmute_sexp<RTypeTo, RModeTo>(&self, sexp: SEXP) -> &RObject<RTypeTo, RModeTo> {
+        unsafe { &*sexp.cast::<RObject<RTypeTo, RModeTo>>() }
     }
 
     fn transmute<RTypeTo, RModeTo>(&self) -> &RObject<RTypeTo, RModeTo> {
@@ -383,16 +385,13 @@ impl<RType, RMode> RObject<RType, RMode> {
         unsafe { std::mem::transmute::<&mut Self, &mut RObject<RTypeTo, RModeTo>>(self) }
     }
 
-    fn transmute_sexp<RTypeTo, RModeTo>(&self, sexp: SEXP) -> &RObject<RTypeTo, RModeTo> {
-        unsafe { std::mem::transmute::<SEXP, &RObject<RTypeTo, RModeTo>>(sexp) }
-    }
-
     /// Duplicate an object.
     ///
     /// Multiple symbols may be bound to the same object, so if the usual R semantics are to
     /// apply, any code which alters one of them needs to make a copy first.
     /// E.g, call this method on arguments pass via `.Call` before modifying them.
     ///
+    #[allow(clippy::mut_from_ref)]
     pub fn clone<'a>(&self, pc: &'a Pc) -> &'a mut RObject<RType, RMode> {
         let sexp = pc.protect(unsafe { Rf_duplicate(self.sexp()) });
         pc.transmute_sexp_mut(sexp)
@@ -475,6 +474,16 @@ impl<RType, RMode> RObject<RType, RMode> {
     pub fn external_ptr(&self) -> Result<&RObject<ExternalPtr, ()>, &'static str> {
         if self.is_external_ptr() {
             Ok(self.transmute())
+        } else {
+            Err("Not an external pointer")
+        }
+    }
+
+    /// Check if appropriate to characterize as an RObject<ExternalPtr, ()>.
+    /// Uses the SEXP type to determine if this is possible.
+    pub fn external_ptr_mut(&mut self) -> Result<&mut RObject<ExternalPtr, ()>, &'static str> {
+        if self.is_external_ptr() {
+            Ok(self.transmute_mut())
         } else {
             Err("Not an external pointer")
         }
@@ -647,16 +656,16 @@ impl<RType, RMode> RObject<RType, RMode> {
     }
 
     /// Check if appropriate to characterize as a str reference.
-    pub fn to_str(self, pc: &Pc) -> Result<&str, Self> {
+    pub fn to_str<'a>(&self, pc: &'a Pc) -> Result<&'a str, &'static str> {
         if self.is_vector() {
             let s: &RObject<Vector, Unknown> = self.transmute();
             if s.is_scalar() {
-                s.to_character(pc).get(0).map_err(|_| self)
+                s.to_character(pc).get(0)
             } else {
-                Err(self)
+                Err("Not a scalar")
             }
         } else {
-            Err(self)
+            Err("Not a vector")
         }
     }
 
@@ -751,12 +760,12 @@ impl<RType, RMode> RObject<RType, RMode> {
 
     /// Get the class or classes of the data in an RObject.
     pub fn get_class(&self) -> &RObject<Vector, Character> {
-        self.wrap(unsafe { Rf_getAttrib(self.sexp(), Pc::symbol_class().sexp()) })
+        self.transmute_sexp(unsafe { Rf_getAttrib(self.sexp(), Pc::symbol_class().sexp()) })
     }
 
     /// Get an attribute.
     pub fn get_attribute(&self, which: &RObject<Symbol, ()>) -> &RObject {
-        self.wrap(unsafe { Rf_getAttrib(self.sexp(), which.sexp()) })
+        self.transmute_sexp(unsafe { Rf_getAttrib(self.sexp(), which.sexp()) })
     }
 }
 
@@ -1023,6 +1032,7 @@ impl<RMode> RObject<Matrix, RMode> {
     }
 
     /// Transpose the matrix.
+    #[allow(clippy::mut_from_ref)]
     pub fn transpose<'a>(&self, pc: &'a Pc) -> &'a mut RObject<Matrix, RMode> {
         let transposed = self.clone(pc);
         let dim: &mut RObject<Vector, i32> = self
@@ -1031,7 +1041,7 @@ impl<RMode> RObject<Matrix, RMode> {
             .transmute_mut();
         let slice = dim.slice_mut();
         slice.swap(0, 1);
-        transposed.set_attribute(&Pc::symbol_dim(), &dim);
+        transposed.set_attribute(Pc::symbol_dim(), dim);
         unsafe { Rf_copyMatrix(transposed.sexp(), self.sexp(), Rboolean_TRUE) };
         transposed
     }
@@ -1310,14 +1320,14 @@ impl RObject<Vector, Character> {
     }
 }
 
-pub struct RListMap2<'a> {
+pub struct RListMap<'a> {
     unused_counter: usize,
     used: Vec<bool>,
     robj: &'a RObject<Vector, List>,
     map: HashMap<&'a str, usize>,
 }
 
-impl RListMap2<'_> {
+impl RListMap<'_> {
     /// Find an RObject in the list based on its name.
     pub fn get(&mut self, name: &str) -> Result<&RObject, String> {
         let Some(index) = self.map.get(name) else {
@@ -1381,14 +1391,14 @@ impl RObject<Vector, List> {
     /// This allows Rust HashMap methods to be used on the contents
     /// of the list, while still retaining the original List within
     /// the RListMap struct in the robj field.
-    pub fn make_map(&self) -> RListMap2 {
+    pub fn make_map(&self) -> RListMap {
         let mut map = HashMap::new();
         let names = self.get_names();
         let len = names.len();
         for i in 0..len {
             map.insert(names.get(i).unwrap(), i);
         }
-        RListMap2 {
+        RListMap {
             unused_counter: len,
             used: vec![false; len],
             robj: self,
@@ -1440,7 +1450,7 @@ impl RObject<Vector, List> {
         }
         self.set_names(&names)?;
         unsafe { Rf_setAttrib(self.sexp(), R_RowNamesSymbol, rownames.sexp()) };
-        self.set_class(&["data.frame"].to_r(pc));
+        self.set_class(["data.frame"].to_r(pc));
         Ok(self.transmute_mut())
     }
 }
@@ -1678,7 +1688,7 @@ impl RObject<ExternalPtr, ()> {
 
     /// Obtain a mutable reference to a Rust object from an R external pointer, pretending a static lifetime.
     ///
-    /// This method obtains a mutable reference to a Rust object from an R external pointer created by [`Self::as_external_ptr`].
+    /// This method obtains a mutable reference to a Rust object from an R external pointer created by [`Self::external_ptr`].
     ///
     /// # Safety
     ///
@@ -1710,7 +1720,7 @@ impl RObject<ExternalPtr, ()> {
 
     /// Get tag for an R external pointer.
     ///
-    /// This method gets the tag associated with an R external pointer, which was set by [`Self::as_external_ptr`].
+    /// This method gets the tag associated with an R external pointer, which was set by [`Self::external_ptr`].
     ///
     pub fn tag(&self) -> &RObject {
         self.transmute_sexp(unsafe { R_ExternalPtrTag(self.sexp()) })
@@ -1730,46 +1740,50 @@ pub trait FromR<RType, RMode, U> {
 /// The traits [ToR2], [ToR3], and [ToR4] are all identical to this trait.
 /// This was done to avoid conflicting trait implementations.
 pub trait ToR1<'a, RType, RMode> {
-    fn to_r(&self, pc: &'a Pc) -> &'a RObject<RType, RMode>;
+    #[allow(clippy::mut_from_ref)]
+    fn to_r(&self, pc: &'a Pc) -> &'a mut RObject<RType, RMode>;
 }
 
 /// Trait for converting objects to RObjects.
 ///
 /// See [ToR1].
 pub trait ToR2<RType, RMode> {
-    fn to_r(self, pc: &Pc) -> &RObject<RType, RMode>;
+    #[allow(clippy::mut_from_ref)]
+    fn to_r(self, pc: &Pc) -> &mut RObject<RType, RMode>;
 }
 
 /// Trait for converting objects to RObjects.
 ///
 /// See [ToR1].
 pub trait ToR3<RType, RMode> {
-    fn to_r(self, pc: &Pc) -> &RObject<RType, RMode>;
+    #[allow(clippy::mut_from_ref)]
+    fn to_r(self, pc: &Pc) -> &mut RObject<RType, RMode>;
 }
 
 /// Trait for converting objects to RObjects.
 ///
 /// See [ToR1].
 pub trait ToR4<RType, RMode> {
-    fn to_r(self, pc: &Pc) -> &RObject<RType, RMode>;
+    #[allow(clippy::mut_from_ref)]
+    fn to_r(self, pc: &Pc) -> &mut RObject<RType, RMode>;
 }
 
 // f64
 
 impl<'a> ToR1<'a, Vector, f64> for f64 {
-    fn to_r(&self, pc: &'a Pc) -> &'a RObject<Vector, f64> {
-        pc.transmute_sexp(pc.protect(unsafe { Rf_ScalarReal(*self) }))
+    fn to_r(&self, pc: &'a Pc) -> &'a mut RObject<Vector, f64> {
+        pc.transmute_sexp_mut(pc.protect(unsafe { Rf_ScalarReal(*self) }))
     }
 }
 
 impl<'a, const N: usize> ToR1<'a, Vector, f64> for [f64; N] {
-    fn to_r(&self, pc: &'a Pc) -> &'a RObject<Vector, f64> {
+    fn to_r(&self, pc: &'a Pc) -> &'a mut RObject<Vector, f64> {
         self.as_ref().to_r(pc)
     }
 }
 
 impl<'a> ToR1<'a, Vector, f64> for &[f64] {
-    fn to_r(&self, pc: &'a Pc) -> &'a RObject<Vector, f64> {
+    fn to_r(&self, pc: &'a Pc) -> &'a mut RObject<Vector, f64> {
         let result = pc.new_vector_double(self.len());
         let slice = result.slice_mut();
         slice.copy_from_slice(self);
@@ -1778,7 +1792,7 @@ impl<'a> ToR1<'a, Vector, f64> for &[f64] {
 }
 
 impl<'a> ToR1<'a, Vector, f64> for &mut [f64] {
-    fn to_r(&self, pc: &'a Pc) -> &'a RObject<Vector, f64> {
+    fn to_r(&self, pc: &'a Pc) -> &'a mut RObject<Vector, f64> {
         let result = pc.new_vector_double(self.len());
         let slice = result.slice_mut();
         slice.copy_from_slice(self);
@@ -1787,7 +1801,7 @@ impl<'a> ToR1<'a, Vector, f64> for &mut [f64] {
 }
 
 impl<'a, T: IntoIterator<Item = &'a f64> + ExactSizeIterator> ToR2<Vector, f64> for T {
-    fn to_r(self, pc: &Pc) -> &RObject<Vector, f64> {
+    fn to_r(self, pc: &Pc) -> &mut RObject<Vector, f64> {
         let result = pc.new_vector_double(self.len());
         let slice = result.slice_mut();
         for (to, from) in slice.iter_mut().zip(self) {
@@ -1798,7 +1812,7 @@ impl<'a, T: IntoIterator<Item = &'a f64> + ExactSizeIterator> ToR2<Vector, f64> 
 }
 
 impl<'a, T: IntoIterator<Item = &'a mut f64> + ExactSizeIterator> ToR3<Vector, f64> for T {
-    fn to_r(self, pc: &Pc) -> &RObject<Vector, f64> {
+    fn to_r(self, pc: &Pc) -> &mut RObject<Vector, f64> {
         let result = pc.new_vector_double(self.len());
         let slice = result.slice_mut();
         for (to, from) in slice.iter_mut().zip(self) {
@@ -1809,7 +1823,7 @@ impl<'a, T: IntoIterator<Item = &'a mut f64> + ExactSizeIterator> ToR3<Vector, f
 }
 
 impl<T: IntoIterator<Item = f64> + ExactSizeIterator> ToR4<Vector, f64> for T {
-    fn to_r(self, pc: &Pc) -> &RObject<Vector, f64> {
+    fn to_r(self, pc: &Pc) -> &mut RObject<Vector, f64> {
         let result = pc.new_vector_double(self.len());
         let slice = result.slice_mut();
         for (to, from) in slice.iter_mut().zip(self) {
@@ -1822,19 +1836,19 @@ impl<T: IntoIterator<Item = f64> + ExactSizeIterator> ToR4<Vector, f64> for T {
 // i32
 
 impl<'a> ToR1<'a, Vector, i32> for i32 {
-    fn to_r(&self, pc: &'a Pc) -> &'a RObject<Vector, i32> {
-        pc.transmute_sexp(pc.protect(unsafe { Rf_ScalarInteger(*self) }))
+    fn to_r(&self, pc: &'a Pc) -> &'a mut RObject<Vector, i32> {
+        pc.transmute_sexp_mut(pc.protect(unsafe { Rf_ScalarInteger(*self) }))
     }
 }
 
 impl<'a, const N: usize> ToR1<'a, Vector, i32> for [i32; N] {
-    fn to_r(&self, pc: &'a Pc) -> &'a RObject<Vector, i32> {
+    fn to_r(&self, pc: &'a Pc) -> &'a mut RObject<Vector, i32> {
         self.as_ref().to_r(pc)
     }
 }
 
 impl<'a> ToR1<'a, Vector, i32> for &[i32] {
-    fn to_r(&self, pc: &'a Pc) -> &'a RObject<Vector, i32> {
+    fn to_r(&self, pc: &'a Pc) -> &'a mut RObject<Vector, i32> {
         let result = pc.new_vector_integer(self.len());
         let slice = result.slice_mut();
         slice.copy_from_slice(self);
@@ -1843,7 +1857,7 @@ impl<'a> ToR1<'a, Vector, i32> for &[i32] {
 }
 
 impl<'a> ToR1<'a, Vector, i32> for &mut [i32] {
-    fn to_r(&self, pc: &'a Pc) -> &'a RObject<Vector, i32> {
+    fn to_r(&self, pc: &'a Pc) -> &'a mut RObject<Vector, i32> {
         let result = pc.new_vector_integer(self.len());
         let slice = result.slice_mut();
         slice.copy_from_slice(self);
@@ -1852,7 +1866,7 @@ impl<'a> ToR1<'a, Vector, i32> for &mut [i32] {
 }
 
 impl<'a, T: IntoIterator<Item = &'a i32> + ExactSizeIterator> ToR2<Vector, i32> for T {
-    fn to_r(self, pc: &Pc) -> &RObject<Vector, i32> {
+    fn to_r(self, pc: &Pc) -> &mut RObject<Vector, i32> {
         let result = pc.new_vector_integer(self.len());
         let slice = result.slice_mut();
         for (to, from) in slice.iter_mut().zip(self) {
@@ -1863,7 +1877,7 @@ impl<'a, T: IntoIterator<Item = &'a i32> + ExactSizeIterator> ToR2<Vector, i32> 
 }
 
 impl<'a, T: IntoIterator<Item = &'a mut i32> + ExactSizeIterator> ToR3<Vector, i32> for T {
-    fn to_r(self, pc: &Pc) -> &RObject<Vector, i32> {
+    fn to_r(self, pc: &Pc) -> &mut RObject<Vector, i32> {
         let result = pc.new_vector_integer(self.len());
         let slice = result.slice_mut();
         for (to, from) in slice.iter_mut().zip(self) {
@@ -1874,7 +1888,7 @@ impl<'a, T: IntoIterator<Item = &'a mut i32> + ExactSizeIterator> ToR3<Vector, i
 }
 
 impl<T: IntoIterator<Item = i32> + ExactSizeIterator> ToR4<Vector, i32> for T {
-    fn to_r(self, pc: &Pc) -> &RObject<Vector, i32> {
+    fn to_r(self, pc: &Pc) -> &mut RObject<Vector, i32> {
         let result = pc.new_vector_integer(self.len());
         let slice = result.slice_mut();
         for (to, from) in slice.iter_mut().zip(self) {
@@ -1887,19 +1901,19 @@ impl<T: IntoIterator<Item = i32> + ExactSizeIterator> ToR4<Vector, i32> for T {
 // usize
 
 impl<'a> ToR1<'a, Vector, i32> for usize {
-    fn to_r(&self, pc: &'a Pc) -> &'a RObject<Vector, i32> {
-        pc.transmute_sexp(pc.protect(unsafe { Rf_ScalarInteger((*self).try_into().unwrap()) }))
+    fn to_r(&self, pc: &'a Pc) -> &'a mut RObject<Vector, i32> {
+        pc.transmute_sexp_mut(pc.protect(unsafe { Rf_ScalarInteger((*self).try_into().unwrap()) }))
     }
 }
 
 impl<'a, const N: usize> ToR1<'a, Vector, i32> for [usize; N] {
-    fn to_r(&self, pc: &'a Pc) -> &'a RObject<Vector, i32> {
+    fn to_r(&self, pc: &'a Pc) -> &'a mut RObject<Vector, i32> {
         self.as_ref().to_r(pc)
     }
 }
 
 impl<'a> ToR1<'a, Vector, i32> for &[usize] {
-    fn to_r(&self, pc: &'a Pc) -> &'a RObject<Vector, i32> {
+    fn to_r(&self, pc: &'a Pc) -> &'a mut RObject<Vector, i32> {
         let result = pc.new_vector_integer(self.len());
         let slice = result.slice_mut();
         for (i, j) in slice.iter_mut().zip(self.iter()) {
@@ -1910,7 +1924,7 @@ impl<'a> ToR1<'a, Vector, i32> for &[usize] {
 }
 
 impl<'a> ToR1<'a, Vector, i32> for &mut [usize] {
-    fn to_r(&self, pc: &'a Pc) -> &'a RObject<Vector, i32> {
+    fn to_r(&self, pc: &'a Pc) -> &'a mut RObject<Vector, i32> {
         let result = pc.new_vector_integer(self.len());
         let slice = result.slice_mut();
         for (i, j) in slice.iter_mut().zip(self.iter()) {
@@ -1923,19 +1937,19 @@ impl<'a> ToR1<'a, Vector, i32> for &mut [usize] {
 // u8
 
 impl<'a> ToR1<'a, Vector, u8> for u8 {
-    fn to_r(&self, pc: &'a Pc) -> &'a RObject<Vector, u8> {
-        pc.transmute_sexp(pc.protect(unsafe { Rf_ScalarRaw(*self) }))
+    fn to_r(&self, pc: &'a Pc) -> &'a mut RObject<Vector, u8> {
+        pc.transmute_sexp_mut(pc.protect(unsafe { Rf_ScalarRaw(*self) }))
     }
 }
 
 impl<'a, const N: usize> ToR1<'a, Vector, u8> for [u8; N] {
-    fn to_r(&self, pc: &'a Pc) -> &'a RObject<Vector, u8> {
+    fn to_r(&self, pc: &'a Pc) -> &'a mut RObject<Vector, u8> {
         self.as_ref().to_r(pc)
     }
 }
 
 impl<'a> ToR1<'a, Vector, u8> for &[u8] {
-    fn to_r(&self, pc: &'a Pc) -> &'a RObject<Vector, u8> {
+    fn to_r(&self, pc: &'a Pc) -> &'a mut RObject<Vector, u8> {
         let result = pc.new_vector_raw(self.len());
         let slice = result.slice_mut();
         slice.copy_from_slice(self);
@@ -1944,7 +1958,7 @@ impl<'a> ToR1<'a, Vector, u8> for &[u8] {
 }
 
 impl<'a> ToR1<'a, Vector, u8> for &mut [u8] {
-    fn to_r(&self, pc: &'a Pc) -> &'a RObject<Vector, u8> {
+    fn to_r(&self, pc: &'a Pc) -> &'a mut RObject<Vector, u8> {
         let result = pc.new_vector_raw(self.len());
         let slice = result.slice_mut();
         slice.copy_from_slice(self);
@@ -1953,7 +1967,7 @@ impl<'a> ToR1<'a, Vector, u8> for &mut [u8] {
 }
 
 impl<'a, T: IntoIterator<Item = &'a u8> + ExactSizeIterator> ToR2<Vector, u8> for T {
-    fn to_r(self, pc: &Pc) -> &RObject<Vector, u8> {
+    fn to_r(self, pc: &Pc) -> &mut RObject<Vector, u8> {
         let result = pc.new_vector_raw(self.len());
         let slice = result.slice_mut();
         for (to, from) in slice.iter_mut().zip(self) {
@@ -1964,7 +1978,7 @@ impl<'a, T: IntoIterator<Item = &'a u8> + ExactSizeIterator> ToR2<Vector, u8> fo
 }
 
 impl<'a, T: IntoIterator<Item = &'a mut u8> + ExactSizeIterator> ToR3<Vector, u8> for T {
-    fn to_r(self, pc: &Pc) -> &RObject<Vector, u8> {
+    fn to_r(self, pc: &Pc) -> &mut RObject<Vector, u8> {
         let result = pc.new_vector_raw(self.len());
         let slice = result.slice_mut();
         for (to, from) in slice.iter_mut().zip(self) {
@@ -1975,7 +1989,7 @@ impl<'a, T: IntoIterator<Item = &'a mut u8> + ExactSizeIterator> ToR3<Vector, u8
 }
 
 impl<T: IntoIterator<Item = u8> + ExactSizeIterator> ToR4<Vector, u8> for T {
-    fn to_r(self, pc: &Pc) -> &RObject<Vector, u8> {
+    fn to_r(self, pc: &Pc) -> &mut RObject<Vector, u8> {
         let result = pc.new_vector_raw(self.len());
         let slice = result.slice_mut();
         for (to, from) in slice.iter_mut().zip(self) {
@@ -1988,8 +2002,8 @@ impl<T: IntoIterator<Item = u8> + ExactSizeIterator> ToR4<Vector, u8> for T {
 // bool
 
 impl<'a> ToR1<'a, Vector, bool> for bool {
-    fn to_r(&self, pc: &'a Pc) -> &'a RObject<Vector, bool> {
-        pc.transmute_sexp(pc.protect(unsafe {
+    fn to_r(&self, pc: &'a Pc) -> &'a mut RObject<Vector, bool> {
+        pc.transmute_sexp_mut(pc.protect(unsafe {
             Rf_ScalarLogical(if *self {
                 Rboolean_TRUE as i32
             } else {
@@ -2000,13 +2014,13 @@ impl<'a> ToR1<'a, Vector, bool> for bool {
 }
 
 impl<'a, const N: usize> ToR1<'a, Vector, bool> for [bool; N] {
-    fn to_r(&self, pc: &'a Pc) -> &'a RObject<Vector, bool> {
+    fn to_r(&self, pc: &'a Pc) -> &'a mut RObject<Vector, bool> {
         self.as_ref().to_r(pc)
     }
 }
 
 impl<'a> ToR1<'a, Vector, bool> for &[bool] {
-    fn to_r(&self, pc: &'a Pc) -> &'a RObject<Vector, bool> {
+    fn to_r(&self, pc: &'a Pc) -> &'a mut RObject<Vector, bool> {
         let result = pc.new_vector_logical(self.len());
         let slice = result.slice_mut();
         for (i, j) in slice.iter_mut().zip(self.iter()) {
@@ -2017,7 +2031,7 @@ impl<'a> ToR1<'a, Vector, bool> for &[bool] {
 }
 
 impl<'a> ToR1<'a, Vector, bool> for &mut [bool] {
-    fn to_r(&self, pc: &'a Pc) -> &'a RObject<Vector, bool> {
+    fn to_r(&self, pc: &'a Pc) -> &'a mut RObject<Vector, bool> {
         let result = pc.new_vector_logical(self.len());
         let slice = result.slice_mut();
         for (i, j) in slice.iter_mut().zip(self.iter()) {
@@ -2028,7 +2042,7 @@ impl<'a> ToR1<'a, Vector, bool> for &mut [bool] {
 }
 
 impl<'a, T: IntoIterator<Item = &'a bool> + ExactSizeIterator> ToR2<Vector, bool> for T {
-    fn to_r(self, pc: &Pc) -> &RObject<Vector, bool> {
+    fn to_r(self, pc: &Pc) -> &mut RObject<Vector, bool> {
         let result = pc.new_vector_logical(self.len());
         let slice = result.slice_mut();
         for (to, from) in slice.iter_mut().zip(self) {
@@ -2043,7 +2057,7 @@ impl<'a, T: IntoIterator<Item = &'a bool> + ExactSizeIterator> ToR2<Vector, bool
 }
 
 impl<'a, T: IntoIterator<Item = &'a mut bool> + ExactSizeIterator> ToR3<Vector, bool> for T {
-    fn to_r(self, pc: &Pc) -> &RObject<Vector, bool> {
+    fn to_r(self, pc: &Pc) -> &mut RObject<Vector, bool> {
         let result = pc.new_vector_logical(self.len());
         let slice = result.slice_mut();
         for (to, from) in slice.iter_mut().zip(self) {
@@ -2058,7 +2072,7 @@ impl<'a, T: IntoIterator<Item = &'a mut bool> + ExactSizeIterator> ToR3<Vector, 
 }
 
 impl<T: IntoIterator<Item = bool> + ExactSizeIterator> ToR4<Vector, bool> for T {
-    fn to_r(self, pc: &Pc) -> &RObject<Vector, bool> {
+    fn to_r(self, pc: &Pc) -> &mut RObject<Vector, bool> {
         let result = pc.new_vector_logical(self.len());
         let slice = result.slice_mut();
         for (to, from) in slice.iter_mut().zip(self) {
@@ -2075,7 +2089,7 @@ impl<T: IntoIterator<Item = bool> + ExactSizeIterator> ToR4<Vector, bool> for T 
 // &str
 
 impl<'a> ToR1<'a, Vector, Character> for &str {
-    fn to_r(&self, pc: &'a Pc) -> &'a RObject<Vector, Character> {
+    fn to_r(&self, pc: &'a Pc) -> &'a mut RObject<Vector, Character> {
         let sexp = unsafe {
             Rf_ScalarString(Rf_mkCharLenCE(
                 self.as_ptr() as *const c_char,
@@ -2083,18 +2097,18 @@ impl<'a> ToR1<'a, Vector, Character> for &str {
                 cetype_t_CE_UTF8,
             ))
         };
-        pc.transmute_sexp(pc.protect(sexp))
+        pc.transmute_sexp_mut(pc.protect(sexp))
     }
 }
 
 impl<'a, const N: usize> ToR1<'a, Vector, Character> for [&str; N] {
-    fn to_r(&self, pc: &'a Pc) -> &'a RObject<Vector, Character> {
+    fn to_r(&self, pc: &'a Pc) -> &'a mut RObject<Vector, Character> {
         self.as_ref().to_r(pc)
     }
 }
 
 impl<'a> ToR1<'a, Vector, Character> for &[&str] {
-    fn to_r(&self, pc: &'a Pc) -> &'a RObject<Vector, Character> {
+    fn to_r(&self, pc: &'a Pc) -> &'a mut RObject<Vector, Character> {
         let result = pc.new_vector_character(self.len());
         for (index, s) in self.iter().enumerate() {
             let _ = result.set(index, s);
@@ -2104,7 +2118,7 @@ impl<'a> ToR1<'a, Vector, Character> for &[&str] {
 }
 
 impl<'a> ToR1<'a, Vector, Character> for &mut [&str] {
-    fn to_r(&self, pc: &'a Pc) -> &'a RObject<Vector, Character> {
+    fn to_r(&self, pc: &'a Pc) -> &'a mut RObject<Vector, Character> {
         let result = pc.new_vector_character(self.len());
         for (index, s) in self.iter().enumerate() {
             let _ = result.set(index, s);
@@ -2115,30 +2129,22 @@ impl<'a> ToR1<'a, Vector, Character> for &mut [&str] {
 
 // &RObject and SEXP
 
+/* TODO
 impl<'a, RType, RMode> ToR1<'a, AnyType, Unknown> for RObject<RType, RMode> {
-    fn to_r(&self, pc: &'a Pc) -> &'a RObject {
-        pc.transmute_sexp(self.sexp())
+    fn to_r(&self, pc: &'a Pc) -> &'a mut RObject {
+        pc.transmute_sexp_mut(self.sexp())
     }
 }
+*/
 
 impl<'a> ToR1<'a, AnyType, Unknown> for SEXP {
-    fn to_r(&self, pc: &'a Pc) -> &'a RObject<AnyType, Unknown> {
-        pc.transmute_sexp(*self)
+    fn to_r(&self, pc: &'a Pc) -> &'a mut RObject<AnyType, Unknown> {
+        pc.transmute_sexp_mut(*self)
     }
 }
 
-impl<'a, RType, RMode> ToR1<'a, RType, RMode> for () {
-    fn to_r(&self, _pc: &'a Pc) -> &'a RObject<RType, RMode> {
-        Pc::null().transmute()
+impl<'a> ToR1<'a, AnyType, Unknown> for () {
+    fn to_r(&self, pc: &'a Pc) -> &'a mut RObject<AnyType, Unknown> {
+        pc.transmute_sexp_mut(unsafe { R_NilValue })
     }
 }
-
-// // Deref
-//
-// impl std::ops::Deref for RObject {
-//     type Target = SEXP;
-//     fn deref(&self) -> &Self::Target {
-//         &unsafe { std::mem::transmute::<&Self, SEXP>(self) }
-//         //&self.sexp()
-//     }
-// }
