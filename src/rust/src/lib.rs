@@ -8,7 +8,7 @@ use roxido::*;
 fn convolve2(a: &RObject, b: &RObject) -> &RObject {
     let a = a.vector().stop_str("'a' not a vector.").to_double(pc);
     let b = b.vector().stop_str("'b' not a vector.").to_double(pc);
-    let mut r = pc.new_vector_double(a.len() + b.len() - 1);
+    let r = pc.new_vector_double(a.len() + b.len() - 1);
     let ab = r.slice_mut();
     for abi in ab.iter_mut() {
         *abi = 0.0;
@@ -39,7 +39,7 @@ fn zero(f: &RObject, guesses: &RObject, tol: &RObject) -> &RObject {
     if !tol.is_finite() || tol <= 0.0 {
         stop!("'tol' must be a strictly positive value.");
     }
-    let mut x_rval = pc.new_vector_double(1);
+    let x_rval = pc.new_vector_double(1);
     let mut g = |x: f64| {
         let _ = x_rval.set(0, x);
         let Ok(fx) = f.call1(&x_rval, pc) else {
@@ -85,8 +85,8 @@ fn myrnorm(n: &RObject, mean: &RObject, sd: &RObject) -> &RObject {
     unsafe {
         use rbindings::*;
         use std::convert::TryFrom;
-        let (mean, sd) = (Rf_asReal(*mean), Rf_asReal(*sd));
-        let len_i32 = Rf_asInteger(*n);
+        let (mean, sd) = (Rf_asReal(mean.sexp()), Rf_asReal(sd.sexp()));
+        let len_i32 = Rf_asInteger(n.sexp());
         let len_isize = isize::try_from(len_i32).unwrap();
         let len_usize = usize::try_from(len_i32).unwrap();
         let vec = Rf_protect(Rf_allocVector(REALSXP, len_isize));

@@ -369,7 +369,7 @@ pub struct RObject<RType = AnyType, RMode = Unknown> {
 }
 
 impl<RType, RMode> RObject<RType, RMode> {
-    fn sexp(&self) -> SEXP {
+    pub fn sexp(&self) -> SEXP {
         unsafe { std::mem::transmute::<&Self, SEXP>(&self) }
     }
 
@@ -2134,3 +2134,13 @@ impl<'a, RType, RMode> ToR1<'a, RType, RMode> for () {
         Pc::null().transmute()
     }
 }
+
+// // Deref
+//
+// impl std::ops::Deref for RObject {
+//     type Target = SEXP;
+//     fn deref(&self) -> &Self::Target {
+//         &unsafe { std::mem::transmute::<&Self, SEXP>(self) }
+//         //&self.sexp()
+//     }
+// }
