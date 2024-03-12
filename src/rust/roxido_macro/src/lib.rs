@@ -119,7 +119,7 @@ fn roxido_fn(options: Vec<NestedMeta>, item_fn: syn::ItemFn) -> TokenStream {
                 arg_names.push(quote!(#name).to_string());
                 let ty = &pat_type.ty;
                 let string = quote!(#ty).to_string();
-                if string != "& RObject" {
+                if string != "& RObject" && string != "& mut RObject"{
                     panic!("All arguments to a function with the 'roxido' attribute must be of type '&RObject', but found '{}'.", string)
                 }
             }
@@ -194,16 +194,17 @@ fn roxido_fn(options: Vec<NestedMeta>, item_fn: syn::ItemFn) -> TokenStream {
         // frame and we've cleaned up all of our heap memory.  Light testing indicated no memory
         // leaks.  See https://docs.rs/crate/setjmp for background information.
         TokenStream::from(quote! {
+            #[allow(clippy::useless_transmute)]
             #[no_mangle]
             extern "C" fn #name(#args) -> crate::rbindings::SEXP {
                 fn to_sexp<RType, RMode>(x: &RObject<RType, RMode>) -> crate::rbindings::SEXP {
                     unsafe { std::mem::transmute::<&RObject<RType, RMode>, crate::rbindings::SEXP>(x) }
                 }
-                let result = std::panic::catch_unwind(|| {
+                let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                     let pc = &mut Pc::new();
                     let mut f = || { #body };
                     to_sexp(f().to_r(pc))
-                });
+                }));
                 match result {
                     Ok(obj) => obj,
                     Err(ref payload) => {
@@ -235,16 +236,17 @@ fn roxido_fn(options: Vec<NestedMeta>, item_fn: syn::ItemFn) -> TokenStream {
         })
     } else {
         TokenStream::from(quote! {
+            #[allow(clippy::useless_transmute)]
             #[no_mangle]
             extern "C" fn #name(#args) -> crate::rbindings::SEXP {
                 fn to_sexp<RType, RMode>(x: &RObject<RType, RMode>) -> crate::rbindings::SEXP {
                     unsafe { std::mem::transmute::<&RObject<RType, RMode>, crate::rbindings::SEXP>(x) }
                 }
-                let result: Result<crate::rbindings::SEXP, _> = std::panic::catch_unwind(|| {
+                let result: Result<crate::rbindings::SEXP, _> = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                     let pc = &mut Pc::new();
                     let mut f = || { #body };
                     to_sexp(f().to_r(pc))
-                });
+                }));
                 match result {
                     Ok(obj) => obj,
                     Err(_) => {

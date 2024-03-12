@@ -377,6 +377,13 @@ impl<RType, RMode> RObject<RType, RMode> {
         unsafe { &*sexp.cast::<RObject<RTypeTo, RModeTo>>() }
     }
 
+    fn transmute_sexp_mut<RTypeTo, RModeTo>(
+        &mut self,
+        sexp: SEXP,
+    ) -> &mut RObject<RTypeTo, RModeTo> {
+        unsafe { &mut *sexp.cast::<RObject<RTypeTo, RModeTo>>() }
+    }
+
     fn transmute<RTypeTo, RModeTo>(&self) -> &RObject<RTypeTo, RModeTo> {
         unsafe { std::mem::transmute::<&Self, &RObject<RTypeTo, RModeTo>>(self) }
     }
@@ -419,11 +426,29 @@ impl<RType, RMode> RObject<RType, RMode> {
         }
     }
 
+    pub fn vector_mut(&mut self) -> Result<&mut RObject<Vector, Unknown>, &'static str> {
+        if self.is_vector() {
+            Ok(self.transmute_mut())
+        } else {
+            Err("Not a vector")
+        }
+    }
+
     /// Check if appropriate to characterize as an RObject<Matrix, Unknown>.
     /// Checks using R's `Rf_isMatrix` function.
     pub fn matrix(&self) -> Result<&RObject<Matrix, Unknown>, &'static str> {
         if self.is_matrix() {
             Ok(self.transmute())
+        } else {
+            Err("Not a matrix")
+        }
+    }
+
+    /// Check if appropriate to characterize as an RObject<Matrix, Unknown>.
+    /// Checks using R's `Rf_isMatrix` function.
+    pub fn matrix_mut(&mut self) -> Result<&mut RObject<Matrix, Unknown>, &'static str> {
+        if self.is_matrix() {
+            Ok(self.transmute_mut())
         } else {
             Err("Not a matrix")
         }
@@ -439,11 +464,31 @@ impl<RType, RMode> RObject<RType, RMode> {
         }
     }
 
+    /// Check if appropriate to characterize as an RObject<Array, Unknown>.
+    /// Checks using R's `Rf_isArray` function.
+    pub fn array_mut(&mut self) -> Result<&mut RObject<Array, Unknown>, &'static str> {
+        if self.is_array() {
+            Ok(self.transmute_mut())
+        } else {
+            Err("Not a vector")
+        }
+    }
+
     /// Check if appropriate to characterize as an RObject<Vector, List>.
     /// Checks using R's `Rf_isVectorList` function.
     pub fn list(&self) -> Result<&RObject<Vector, List>, &'static str> {
         if self.is_list() {
             Ok(self.transmute())
+        } else {
+            Err("Not a list")
+        }
+    }
+
+    /// Check if appropriate to characterize as an RObject<Vector, List>.
+    /// Checks using R's `Rf_isVectorList` function.
+    pub fn list_mut(&mut self) -> Result<&mut RObject<Vector, List>, &'static str> {
+        if self.is_list() {
+            Ok(self.transmute_mut())
         } else {
             Err("Not a list")
         }
@@ -459,11 +504,31 @@ impl<RType, RMode> RObject<RType, RMode> {
         }
     }
 
+    /// Check if appropriate to characterize as an RObject<Vector, DataFrame>.
+    /// Checks using R's `Rf_isFrame` function.
+    pub fn data_frame_mut(&mut self) -> Result<&mut RObject<Vector, DataFrame>, &'static str> {
+        if self.is_data_frame() {
+            Ok(self.transmute_mut())
+        } else {
+            Err("Not a data frame")
+        }
+    }
+
     /// Check if appropriate to characterize as an RObject<Function, ()>.
     /// Checks using R's `Rf_isFunction` function.
     pub fn function(&self) -> Result<&RObject<Function, ()>, &'static str> {
         if self.is_function() {
             Ok(self.transmute())
+        } else {
+            Err("Not a function")
+        }
+    }
+
+    /// Check if appropriate to characterize as an RObject<Function, ()>.
+    /// Checks using R's `Rf_isFunction` function.
+    pub fn function_mut(&mut self) -> Result<&mut RObject<Function, ()>, &'static str> {
+        if self.is_function() {
+            Ok(self.transmute_mut())
         } else {
             Err("Not a function")
         }
@@ -805,6 +870,15 @@ impl<RType: HasLength, RMode: Atomic> RObject<RType, RMode> {
         }
     }
 
+    /// Check if appropriate to characterize storage mode as "double".
+    pub fn double_mut(&mut self) -> Result<&mut RObject<RType, f64>, &'static str> {
+        if self.is_double() {
+            Ok(self.transmute_mut())
+        } else {
+            Err("Not of storage mode 'double'")
+        }
+    }
+
     /// Checks to see if the data can be interpreted as R double.
     pub fn is_double(&self) -> bool {
         unsafe { Rf_isReal(self.sexp()) != 0 }
@@ -834,6 +908,15 @@ impl<RType: HasLength, RMode: Atomic> RObject<RType, RMode> {
     pub fn integer(&self) -> Result<&RObject<RType, i32>, &'static str> {
         if self.is_integer() {
             Ok(self.transmute())
+        } else {
+            Err("Not of storage mode 'integer'")
+        }
+    }
+
+    /// Check if appropriate to characterize storage mode as "double".
+    pub fn integer_mut(&mut self) -> Result<&mut RObject<RType, i32>, &'static str> {
+        if self.is_integer() {
+            Ok(self.transmute_mut())
         } else {
             Err("Not of storage mode 'integer'")
         }
@@ -873,6 +956,15 @@ impl<RType: HasLength, RMode: Atomic> RObject<RType, RMode> {
         }
     }
 
+    /// Check if appropriate to characterize storage mode as "double".
+    pub fn raw_mut(&mut self) -> Result<&mut RObject<RType, u8>, &'static str> {
+        if self.is_raw() {
+            Ok(self.transmute_mut())
+        } else {
+            Err("Not of storage mode 'raw'")
+        }
+    }
+
     /// Checks to see if the data can be interpreted as R double.
     pub fn is_raw(&self) -> bool {
         unsafe { TYPEOF(self.sexp()) == RAWSXP as i32 }
@@ -907,6 +999,15 @@ impl<RType: HasLength, RMode: Atomic> RObject<RType, RMode> {
         }
     }
 
+    /// Check if appropriate to characterize storage mode as "double".
+    pub fn logical_mut(&mut self) -> Result<&mut RObject<RType, bool>, &'static str> {
+        if self.is_logical() {
+            Ok(self.transmute_mut())
+        } else {
+            Err("Not of storage mode 'logical'")
+        }
+    }
+
     /// Checks to see if the data can be interpreted as R double.
     pub fn is_logical(&self) -> bool {
         unsafe { Rf_isLogical(self.sexp()) != 0 }
@@ -936,6 +1037,15 @@ impl<RType: HasLength, RMode: Atomic> RObject<RType, RMode> {
     pub fn character(&self) -> Result<&RObject<RType, Character>, &'static str> {
         if self.is_character() {
             Ok(self.transmute())
+        } else {
+            Err("Not of storage mode 'logical'")
+        }
+    }
+
+    /// Check if appropriate to characterize storage mode as "double".
+    pub fn character_mut(&mut self) -> Result<&mut RObject<RType, Character>, &'static str> {
+        if self.is_character() {
+            Ok(self.transmute_mut())
         } else {
             Err("Not of storage mode 'logical'")
         }
@@ -1063,9 +1173,9 @@ impl<RType> RObject<Array, RType> {
 
     // Create a new vector from a matrix.
     /// Convert an Array to a Vector.
-    pub fn to_vector(&self) -> &RObject<Vector, RType> {
+    pub fn to_vector(&mut self) -> &mut RObject<Vector, RType> {
         unsafe { Rf_setAttrib(self.sexp(), R_DimSymbol, R_NilValue) };
-        self.transmute()
+        self.transmute_mut()
     }
 }
 
@@ -1179,6 +1289,18 @@ impl<RMode> RObject<Vector, RMode> {
         }
     }
 
+    fn get_mut_engine<T>(
+        &mut self,
+        index: usize,
+        f: unsafe extern "C" fn(SEXP, isize) -> T,
+    ) -> Result<T, &'static str> {
+        if index < self.len() {
+            Ok(unsafe { f(self.sexp(), index.try_into().unwrap()) })
+        } else {
+            Err("Index out of bounds")
+        }
+    }
+
     /// Get names of values in a Vector.
     pub fn get_names(&self) -> &RObject<Vector, Character> {
         self.transmute_sexp(unsafe { Rf_getAttrib(self.sexp(), R_NamesSymbol) })
@@ -1215,9 +1337,7 @@ impl RObject<Vector, f64> {
     pub fn get(&self, index: usize) -> Result<f64, &'static str> {
         self.get_engine(index, REAL_ELT)
     }
-}
 
-impl RObject<Vector, f64> {
     /// Set the value at a certain index in an f64 Vector.
     pub fn set(&mut self, index: usize, value: f64) -> Result<(), &'static str> {
         self.set_engine(index, value, SET_REAL_ELT)
@@ -1229,9 +1349,7 @@ impl RObject<Vector, i32> {
     pub fn get(&self, index: usize) -> Result<i32, &'static str> {
         self.get_engine(index, INTEGER_ELT)
     }
-}
 
-impl RObject<Vector, i32> {
     /// Set the value at a certain index in an i32 Vector.
     pub fn set(&mut self, index: usize, value: i32) -> Result<(), &'static str> {
         self.set_engine(index, value, SET_INTEGER_ELT)
@@ -1243,9 +1361,7 @@ impl RObject<Vector, u8> {
     pub fn get(&self, index: usize) -> Result<u8, &'static str> {
         self.get_engine(index, RAW_ELT)
     }
-}
 
-impl RObject<Vector, u8> {
     /// Set the value at a certain index in a u8 Vector.
     pub fn set(&mut self, index: usize, value: u8) -> Result<(), &'static str> {
         self.set_engine(index, value, SET_RAW_ELT)
@@ -1262,9 +1378,7 @@ impl RObject<Vector, bool> {
     pub fn get_i32(&self, index: usize) -> Result<i32, &'static str> {
         self.get_engine(index, LOGICAL_ELT)
     }
-}
 
-impl RObject<Vector, bool> {
     /// Set the value at a certain index in a logical Vector.
     pub fn set(&mut self, index: usize, value: bool) -> Result<(), &'static str> {
         let value = if value {
@@ -1297,9 +1411,7 @@ impl RObject<Vector, Character> {
             Err(e) => Err(e),
         }
     }
-}
 
-impl RObject<Vector, Character> {
     /// Set the value at a certain index in a character Vector.
     pub fn set(&mut self, index: usize, value: &str) -> Result<(), &'static str> {
         unsafe {
@@ -1375,12 +1487,29 @@ impl RObject<Vector, List> {
             .map(|sexp| self.transmute_sexp(sexp))
     }
 
+    /// Get the value at a certain index in a List.
+    pub fn get_mut(&mut self, index: usize) -> Result<&mut RObject, &'static str> {
+        self.get_mut_engine(index, VECTOR_ELT)
+            .map(|sexp| self.transmute_sexp_mut(sexp))
+    }
+
     /// Get a value from the List based on its key.
     pub fn get_by_key(&self, key: impl AsRef<str>) -> Result<&RObject, String> {
         let names = self.get_names();
         for i in 0..names.len() {
             if names.get(i).unwrap() == key.as_ref() {
                 return Ok(self.get(i)?);
+            }
+        }
+        Err(format!("Could not find '{}' in the list", key.as_ref()))
+    }
+
+    /// Get a value from the List based on its key.
+    pub fn get_mut_by_key(&mut self, key: impl AsRef<str>) -> Result<&mut RObject, String> {
+        let names = self.get_names();
+        for i in 0..names.len() {
+            if names.get(i).unwrap() == key.as_ref() {
+                return Ok(self.get_mut(i)?);
             }
         }
         Err(format!("Could not find '{}' in the list", key.as_ref()))
@@ -1405,9 +1534,7 @@ impl RObject<Vector, List> {
             map,
         }
     }
-}
 
-impl RObject<Vector, List> {
     /// Set the value at a certain index in a List.
     pub fn set<RType, RMode>(
         &mut self,
@@ -1465,9 +1592,7 @@ impl RObject<Vector, DataFrame> {
     pub fn get_rownames(&self) -> &RObject<Vector, Character> {
         self.transmute_sexp(unsafe { Rf_getAttrib(self.sexp(), R_RowNamesSymbol) })
     }
-}
 
-impl RObject<Vector, DataFrame> {
     /// Set the value at a certain index in a DataFrame.
     pub fn set<RType, RMode>(
         &mut self,
@@ -1542,9 +1667,7 @@ impl RObject<Matrix, f64> {
     pub fn get(&self, index: (usize, usize)) -> Result<f64, &'static str> {
         self.transmute::<Vector, f64>().get(self.index(index))
     }
-}
 
-impl RObject<Matrix, f64> {
     /// Set the value at a certain index in a double Matrix.
     pub fn set(&mut self, index: (usize, usize), value: f64) -> Result<(), &'static str> {
         let index = self.index(index);
@@ -1557,9 +1680,7 @@ impl RObject<Matrix, i32> {
     pub fn get(&self, index: (usize, usize)) -> Result<i32, &'static str> {
         self.transmute::<Vector, i32>().get(self.index(index))
     }
-}
 
-impl RObject<Matrix, i32> {
     /// Set the value at a certain index in an integer Matrix.
     pub fn set(&mut self, index: (usize, usize), value: i32) -> Result<(), &'static str> {
         let index = self.index(index);
@@ -1572,9 +1693,7 @@ impl RObject<Matrix, u8> {
     pub fn get(&self, index: (usize, usize)) -> Result<u8, &'static str> {
         self.transmute::<Vector, u8>().get(self.index(index))
     }
-}
 
-impl RObject<Matrix, u8> {
     /// Set the value at a certain index in a raw Matrix.
     pub fn set(&mut self, index: (usize, usize), value: u8) -> Result<(), &'static str> {
         let index = self.index(index);
@@ -1592,9 +1711,7 @@ impl RObject<Matrix, bool> {
     pub fn get_i32(&self, index: (usize, usize)) -> Result<i32, &'static str> {
         self.transmute::<Vector, bool>().get_i32(self.index(index))
     }
-}
 
-impl RObject<Matrix, bool> {
     /// Set the value at a certain index in a logical Matrix.
     pub fn set(&mut self, index: (usize, usize), value: bool) -> Result<(), &'static str> {
         let index = self.index(index);
@@ -1613,9 +1730,7 @@ impl RObject<Matrix, Character> {
     pub fn get(&self, index: (usize, usize)) -> Result<&str, &'static str> {
         self.transmute::<Vector, Character>().get(self.index(index))
     }
-}
 
-impl RObject<Matrix, Character> {
     /// Set the value at a certain index in a character Matrix.
     pub fn set<RType, RMode>(
         &mut self,
@@ -1679,7 +1794,7 @@ impl RObject<ExternalPtr, ()> {
     ///
     /// This method obtains a mutable reference to a Rust object from an R external pointer created by [`Self::as_external_ptr`].
     ///
-    pub fn decode_mut<T>(&mut self) -> &mut T {
+    pub fn decode_mut<'a, T>(&mut self) -> &'a mut T {
         unsafe {
             let ptr = R_ExternalPtrAddr(self.sexp()) as *mut T;
             ptr.as_mut().unwrap()
@@ -2129,13 +2244,11 @@ impl<'a> ToR1<'a, Vector, Character> for &mut [&str] {
 
 // &RObject and SEXP
 
-/* TODO
 impl<'a, RType, RMode> ToR1<'a, AnyType, Unknown> for RObject<RType, RMode> {
     fn to_r(&self, pc: &'a Pc) -> &'a mut RObject {
         pc.transmute_sexp_mut(self.sexp())
     }
 }
-*/
 
 impl<'a> ToR1<'a, AnyType, Unknown> for SEXP {
     fn to_r(&self, pc: &'a Pc) -> &'a mut RObject<AnyType, Unknown> {
