@@ -119,7 +119,7 @@ fn roxido_fn(options: Vec<NestedMeta>, item_fn: syn::ItemFn) -> TokenStream {
                 arg_names.push(quote!(#name).to_string());
                 let ty = &pat_type.ty;
                 let string = quote!(#ty).to_string();
-                if string != "& RObject" && string != "& mut RObject"{
+                if !( string.starts_with("& ") && string.ends_with(" RObject")) {
                     panic!("All arguments to a function with the 'roxido' attribute must be of type '&RObject', but found '{}'.", string)
                 }
             }
