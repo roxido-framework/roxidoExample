@@ -191,14 +191,53 @@ impl Pc {
         self.new_matrix(STRSXP, nrow, ncol)
     }
 
-    // TODO Array
+    fn new_array<T>(&self, code: u32, dim: &[usize]) -> &mut RObject<Array, T> {
+        let d = dim.iter().map(|x| i32::try_from(*x).unwrap()).to_r(self);
+        self.transmute_sexp_mut(self.protect(unsafe { Rf_allocArray(code, d.sexp()) }))
+    }
+
+    /// Create a new array of storage mode "double".
+    pub fn new_array_double(&self, dim: &[usize]) -> &mut RObject<Array, f64> {
+        self.new_array::<f64>(REALSXP, dim)
+    }
+
+    /// Create a new array of storage mode "integer".
+    pub fn new_array_integer(&self, dim: &[usize]) -> &mut RObject<Array, i32> {
+        self.new_array::<i32>(INTSXP, dim)
+    }
+
+    /// Create a new array of storage mode "raw".
+    pub fn new_array_raw(&self, dim: &[usize]) -> &mut RObject<Array, u8> {
+        self.new_array::<u8>(RAWSXP, dim)
+    }
+
+    /// Create a new array of storage mode "logical".
+    pub fn new_array_logical(&self, dim: &[usize]) -> &mut RObject<Array, bool> {
+        self.new_array::<bool>(LGLSXP, dim)
+    }
+
+    /// Create a new array of storage mode "character".
+    pub fn new_array_character(&self, dim: &[usize]) -> &mut RObject<Array, Character> {
+        self.new_array::<Character>(STRSXP, dim)
+    }
 
     /// Create a new list.
     pub fn new_list(&self, length: usize) -> &mut RObject<Vector, List> {
         self.new_vector(VECSXP, length)
     }
 
-    // TODO New error
+    /// Define a new error.
+    ///
+    /// This does *not* throw an error.  To throw an R error, simply use `stop!`.
+    ///
+    pub fn new_error(&self, message: &str) -> &RObject {
+        let list = self.new_list(2);
+        let _ = list.set(0, message.to_r(self));
+        let _ = list.set(1, Self::null());
+        let _ = list.set_names(["message", "calls"].to_r(self));
+        list.set_class(["error", "condition"].to_r(self));
+        list.transmute()
+    }
 
     /// Define a new symbol.
     #[allow(clippy::mut_from_ref)]
