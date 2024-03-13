@@ -37,6 +37,8 @@ impl Drop for Pc {
 #[doc(hidden)]
 pub struct AnyType(());
 
+pub struct Scalar(());
+
 pub struct Vector(());
 
 pub struct Matrix(());
@@ -65,6 +67,7 @@ pub struct List(());
 pub struct DataFrame(());
 
 pub trait HasLength {}
+impl HasLength for Scalar {}
 impl HasLength for Vector {}
 impl HasLength for Matrix {}
 impl HasLength for Array {}
@@ -76,14 +79,6 @@ impl Atomic for u8 {}
 impl Atomic for bool {}
 impl Atomic for Character {}
 impl Atomic for Unknown {}
-
-#[doc(hidden)]
-pub trait Convertible {}
-impl Convertible for Vector {}
-impl Convertible for Matrix {}
-impl Convertible for Array {}
-impl Convertible for Function {}
-impl Convertible for ExternalPtr {}
 
 impl Pc {
     /// Allocate a new protection counter.
@@ -118,6 +113,42 @@ impl Pc {
         sexp: SEXP,
     ) -> &'static RObject<RTypeTo, RModeTo> {
         unsafe { &*sexp.cast::<RObject<RTypeTo, RModeTo>>() }
+    }
+
+    /// Create a new scalar (i.e., a vector of length 1) of storage mode "double".
+    pub fn new_scalar_double(&self, x: f64) -> &mut RObject<Scalar, f64> {
+        let sexp = self.protect(unsafe { Rf_ScalarReal(x) });
+        self.transmute_sexp_mut(sexp)
+    }
+
+    /// Create a new scalar (i.e., a vector of length 1) of storage mode "integer".
+    pub fn new_scalar_integer(&self, x: i32) -> &mut RObject<Scalar, i32> {
+        let sexp = self.protect(unsafe { Rf_ScalarInteger(x) });
+        self.transmute_sexp_mut(sexp)
+    }
+
+    /// Create a new scalar (i.e., a vector of length 1) of storage mode "raw".
+    pub fn new_scalar_raw(&self, x: u8) -> &mut RObject<Scalar, u8> {
+        let sexp = self.protect(unsafe { Rf_ScalarRaw(x) });
+        self.transmute_sexp_mut(sexp)
+    }
+
+    /// Create a new scalar (i.e., a vector of length 1) of storage mode "logical".
+    pub fn new_scalar_logical(&self, x: bool) -> &mut RObject<Scalar, bool> {
+        let sexp = self.protect(unsafe { Rf_ScalarLogical(if x { 1 } else { 0 }) });
+        self.transmute_sexp_mut(sexp)
+    }
+
+    /// Create a new scalar (i.e., a vector of length 1) of storage mode "character".
+    pub fn new_scalar_character(&self, x: &str) -> &mut RObject<Scalar, Character> {
+        let sexp = unsafe {
+            Rf_ScalarString(Rf_mkCharLenCE(
+                x.as_ptr() as *const c_char,
+                x.len().try_into().unwrap(),
+                cetype_t_CE_UTF8,
+            ))
+        };
+        self.transmute_sexp_mut(self.protect(sexp))
     }
 
     fn new_vector<'a, RMode>(&self, code: u32, length: usize) -> &'a mut RObject<Vector, RMode> {
@@ -457,6 +488,24 @@ impl<RType, RMode> RObject<RType, RMode> {
         }
     }
 
+    pub fn scalar(&self) -> Result<&RObject<Scalar, Unknown>, &'static str> {
+        let s = self.vector()?;
+        if s.is_scalar() {
+            Ok(self.transmute())
+        } else {
+            Err("Not a scalar")
+        }
+    }
+
+    pub fn scalar_mut(&mut self) -> Result<&mut RObject<Scalar, Unknown>, &'static str> {
+        let s = self.vector()?;
+        if s.is_scalar() {
+            Ok(self.transmute_mut())
+        } else {
+            Err("Not a scalar")
+        }
+    }
+
     pub fn vector(&self) -> Result<&RObject<Vector, Unknown>, &'static str> {
         if self.is_vector() {
             Ok(self.transmute())
@@ -590,186 +639,6 @@ impl<RType, RMode> RObject<RType, RMode> {
             Ok(self.transmute_mut())
         } else {
             Err("Not an external pointer")
-        }
-    }
-
-    /// Check if appropriate to characterize as an f64.
-    pub fn f64(&self) -> Result<f64, &'static str> {
-        if self.is_vector() {
-            let s: &RObject<Vector, Unknown> = self.transmute();
-            if s.is_scalar() {
-                Ok(unsafe { Rf_asReal(s.sexp()) })
-            } else {
-                Err("Not a scalar")
-            }
-        } else {
-            Err("Not a vector")
-        }
-    }
-
-    /// Check if appropriate to characterize as an i32.
-    pub fn i32(&self) -> Result<i32, &'static str> {
-        if self.is_vector() {
-            let s: &RObject<Vector, Unknown> = self.transmute();
-            if s.is_scalar() {
-                if s.is_integer() {
-                    let x = unsafe { Rf_asInteger(s.sexp()) };
-                    if x == i32::MIN {
-                        Err("Equals NA")
-                    } else {
-                        Ok(x)
-                    }
-                } else if s.is_double() {
-                    let y = unsafe { Rf_asReal(s.sexp()) };
-                    if y > f64::from(i32::MAX) || y <= f64::from(i32::MIN) || y.is_nan() {
-                        Err("Greater than maximum i32, equals NA, less than minimum i32, or equals NaN")
-                    } else {
-                        Ok(y.round() as i32)
-                    }
-                } else if s.is_raw() {
-                    Ok(unsafe { Rf_asInteger(s.sexp()) })
-                } else if s.is_logical() {
-                    let y = unsafe { Rf_asLogical(s.sexp()) };
-                    if y == i32::MIN {
-                        Err("Equals NA")
-                    } else {
-                        Ok(y)
-                    }
-                } else {
-                    Err("Unsupported type")
-                }
-            } else {
-                Err("Not a scalar")
-            }
-        } else {
-            Err("Not a vector")
-        }
-    }
-
-    /// Check if appropriate to characterize as a usize.
-    pub fn usize(&self) -> Result<usize, &'static str> {
-        if self.is_vector() {
-            let s: &RObject<Vector, Unknown> = self.transmute();
-            if s.is_scalar() {
-                if s.is_integer() {
-                    let x = unsafe { Rf_asInteger(s.sexp()) };
-                    usize::try_from(x).map_err(|_| "Cannot map to usize")
-                } else if s.is_double() {
-                    let y = unsafe { Rf_asReal(s.sexp()) };
-                    let z = y as usize;
-                    if z as f64 == y {
-                        Ok(z)
-                    } else {
-                        Err("Conversion error for usize")
-                    }
-                } else if s.is_raw() {
-                    let x = unsafe { Rf_asInteger(s.sexp()) };
-                    usize::try_from(x).map_err(|_| "Cannot map to usize")
-                } else if s.is_logical() {
-                    let x = unsafe { Rf_asLogical(s.sexp()) };
-                    if x == i32::MIN {
-                        Err("Equals NA")
-                    } else {
-                        usize::try_from(x).map_err(|_| "Cannot map to usize")
-                    }
-                } else {
-                    Err("Unsupported type")
-                }
-            } else {
-                Err("Not a scalar")
-            }
-        } else {
-            Err("Not a vector")
-        }
-    }
-
-    /// Check if appropriate to characterize as a u8.
-    pub fn u8(&self) -> Result<u8, &'static str> {
-        if self.is_vector() {
-            let s: &RObject<Vector, Unknown> = self.transmute();
-            if s.is_scalar() {
-                if s.is_integer() {
-                    let x = unsafe { Rf_asInteger(s.sexp()) };
-                    u8::try_from(x).map_err(|_| "Cannot map to u8")
-                } else if s.is_double() {
-                    let y = unsafe { Rf_asReal(s.sexp()) };
-                    let z = y as u8;
-                    if z as f64 == y {
-                        Ok(z)
-                    } else {
-                        Err("Conversion error to u8")
-                    }
-                } else if s.is_raw() {
-                    let x = unsafe { Rf_asInteger(s.sexp()) };
-                    u8::try_from(x).map_err(|_| "Cannot map to u8")
-                } else if s.is_logical() {
-                    let x = unsafe { Rf_asLogical(s.sexp()) };
-                    if x == i32::MIN {
-                        Err("Equals R's NA for bool")
-                    } else {
-                        u8::try_from(x).map_err(|_| "Cannot map to usize")
-                    }
-                } else {
-                    Err("Unsupported type")
-                }
-            } else {
-                Err("Not a scalar")
-            }
-        } else {
-            Err("Not a vector")
-        }
-    }
-
-    /// Check if appropriate to characterize as a bool.
-    pub fn bool(&self) -> Result<bool, &'static str> {
-        if self.is_vector() {
-            let s: &RObject<Vector, Unknown> = self.transmute();
-            if s.is_scalar() {
-                if s.is_integer() {
-                    let x = unsafe { Rf_asInteger(s.sexp()) };
-                    if x == i32::MIN {
-                        Err("Equals NA")
-                    } else {
-                        Ok(x != 0)
-                    }
-                } else if s.is_double() {
-                    let y = unsafe { Rf_asReal(s.sexp()) };
-                    if Pc::is_na_double(y) || Pc::is_nan(y) {
-                        Err("Equal NA or NaN")
-                    } else {
-                        Ok(y != 0.0)
-                    }
-                } else if s.is_raw() {
-                    Ok(unsafe { Rf_asInteger(s.sexp()) } != 0)
-                } else if s.is_logical() {
-                    let y = unsafe { Rf_asLogical(s.sexp()) };
-                    if y == i32::MIN {
-                        Err("Equals NA")
-                    } else {
-                        Ok(y != 0)
-                    }
-                } else {
-                    Err("Unsupported type")
-                }
-            } else {
-                Err("Not a scalar")
-            }
-        } else {
-            Err("Not a vector")
-        }
-    }
-
-    /// Check if appropriate to characterize as a str reference.
-    pub fn to_str<'a>(&self, pc: &'a Pc) -> Result<&'a str, &'static str> {
-        if self.is_vector() {
-            let s: &RObject<Vector, Unknown> = self.transmute();
-            if s.is_scalar() {
-                s.to_character(pc).get(0)
-            } else {
-                Err("Not a scalar")
-            }
-        } else {
-            Err("Not a vector")
         }
     }
 
@@ -1196,9 +1065,9 @@ impl<RMode> RObject<Matrix, RMode> {
     }
 
     /// Manipulates the matrix in place to be a vector by dropping the `dim` attribute.
-    pub fn to_vector(&self) -> &RObject<Vector, RMode> {
+    pub fn as_vector(&mut self) -> &mut RObject<Vector, RMode> {
         unsafe { Rf_setAttrib(self.sexp(), R_DimSymbol, R_NilValue) };
-        self.transmute()
+        self.transmute_mut()
     }
 }
 
@@ -1212,7 +1081,7 @@ impl<RType> RObject<Array, RType> {
 
     // Create a new vector from a matrix.
     /// Convert an Array to a Vector.
-    pub fn to_vector(&mut self) -> &mut RObject<Vector, RType> {
+    pub fn as_vector(&mut self) -> &mut RObject<Vector, RType> {
         unsafe { Rf_setAttrib(self.sexp(), R_DimSymbol, R_NilValue) };
         self.transmute_mut()
     }
@@ -1312,6 +1181,148 @@ impl RObject<Function, ()> {
             )
         };
         Self::eval(expression, pc)
+    }
+}
+
+impl<RMode: Atomic> RObject<Scalar, RMode> {
+    /// Check if appropriate to characterize as an f64.
+    pub fn f64(&self) -> f64 {
+        unsafe { Rf_asReal(self.sexp()) }
+    }
+
+    /// Check if appropriate to characterize as an i32.
+    pub fn i32(&self) -> Result<i32, &'static str> {
+        if self.is_integer() {
+            let x = unsafe { Rf_asInteger(self.sexp()) };
+            if x == i32::MIN {
+                Err("Equals NA")
+            } else {
+                Ok(x)
+            }
+        } else if self.is_double() {
+            let y = unsafe { Rf_asReal(self.sexp()) };
+            if y > f64::from(i32::MAX) || y <= f64::from(i32::MIN) || y.is_nan() {
+                Err("Greater than maximum i32, equals NA, less than minimum i32, or equals NaN")
+            } else {
+                Ok(y.round() as i32)
+            }
+        } else if self.is_raw() {
+            Ok(unsafe { Rf_asInteger(self.sexp()) })
+        } else if self.is_logical() {
+            let y = unsafe { Rf_asLogical(self.sexp()) };
+            if y == i32::MIN {
+                Err("Equals NA")
+            } else {
+                Ok(y)
+            }
+        } else {
+            Err("Unsupported type")
+        }
+    }
+
+    /// Check if appropriate to characterize as a usize.
+    pub fn usize(&self) -> Result<usize, &'static str> {
+        if self.is_integer() {
+            let x = unsafe { Rf_asInteger(self.sexp()) };
+            usize::try_from(x).map_err(|_| "Cannot map to usize")
+        } else if self.is_double() {
+            let y = unsafe { Rf_asReal(self.sexp()) };
+            let z = y as usize;
+            if z as f64 == y {
+                Ok(z)
+            } else {
+                Err("Conversion error for usize")
+            }
+        } else if self.is_raw() {
+            let x = unsafe { Rf_asInteger(self.sexp()) };
+            usize::try_from(x).map_err(|_| "Cannot map to usize")
+        } else if self.is_logical() {
+            let x = unsafe { Rf_asLogical(self.sexp()) };
+            if x == i32::MIN {
+                Err("Equals NA")
+            } else {
+                usize::try_from(x).map_err(|_| "Cannot map to usize")
+            }
+        } else {
+            Err("Unsupported type")
+        }
+    }
+
+    /// Check if appropriate to characterize as a u8.
+    pub fn u8(&self) -> Result<u8, &'static str> {
+        if self.is_integer() {
+            let x = unsafe { Rf_asInteger(self.sexp()) };
+            u8::try_from(x).map_err(|_| "Cannot map to u8")
+        } else if self.is_double() {
+            let y = unsafe { Rf_asReal(self.sexp()) };
+            let z = y as u8;
+            if z as f64 == y {
+                Ok(z)
+            } else {
+                Err("Conversion error to u8")
+            }
+        } else if self.is_raw() {
+            let x = unsafe { Rf_asInteger(self.sexp()) };
+            u8::try_from(x).map_err(|_| "Cannot map to u8")
+        } else if self.is_logical() {
+            let x = unsafe { Rf_asLogical(self.sexp()) };
+            if x == i32::MIN {
+                Err("Equals R's NA for bool")
+            } else {
+                u8::try_from(x).map_err(|_| "Cannot map to usize")
+            }
+        } else {
+            Err("Unsupported type")
+        }
+    }
+
+    /// Check if appropriate to characterize as a bool.
+    pub fn bool(&self) -> Result<bool, &'static str> {
+        if self.is_integer() {
+            let x = unsafe { Rf_asInteger(self.sexp()) };
+            if x == i32::MIN {
+                Err("Equals NA")
+            } else {
+                Ok(x != 0)
+            }
+        } else if self.is_double() {
+            let y = unsafe { Rf_asReal(self.sexp()) };
+            if Pc::is_na_double(y) || Pc::is_nan(y) {
+                Err("Equal NA or NaN")
+            } else {
+                Ok(y != 0.0)
+            }
+        } else if self.is_raw() {
+            Ok(unsafe { Rf_asInteger(self.sexp()) } != 0)
+        } else if self.is_logical() {
+            let y = unsafe { Rf_asLogical(self.sexp()) };
+            if y == i32::MIN {
+                Err("Equals NA")
+            } else {
+                Ok(y != 0)
+            }
+        } else {
+            Err("Unsupported type")
+        }
+    }
+
+    /// Check if appropriate to characterize as a str reference.
+    pub fn to_str<'a>(&self, pc: &'a Pc) -> Result<&'a str, &'static str> {
+        if self.is_vector() {
+            let s: &RObject<Vector, Unknown> = self.transmute();
+            if s.is_scalar() {
+                s.to_character(pc).get(0)
+            } else {
+                Err("Not a scalar")
+            }
+        } else {
+            Err("Not a vector")
+        }
+    }
+
+    /// Manipulates the matrix in place to be a vector by dropping the `dim` attribute.
+    pub fn as_vector(&self) -> &RObject<Vector, RMode> {
+        self.transmute()
     }
 }
 
