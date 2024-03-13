@@ -5,9 +5,7 @@ mod registration {
 use roxido::*;
 
 #[roxido]
-fn convolve2(a: &RObject, b: &RObject) -> &RObject {
-    let a = a.vector().stop_str("'a' not a vector.").to_double(pc);
-    let b = b.vector().stop_str("'b' not a vector.").to_double(pc);
+fn convolve2(a: &RObject<RVector, f64>, b: &RObject<RVector, f64>) -> &RObject {
     let r = pc.new_vector_double(a.len() + b.len() - 1);
     let ab = r.slice_mut();
     for abi in ab.iter_mut() {
@@ -22,30 +20,28 @@ fn convolve2(a: &RObject, b: &RObject) -> &RObject {
 }
 
 #[roxido]
-fn zero(f: &RObject, guesses: &RObject, tol: &RObject) -> &RObject {
-    let f = f.function().stop_str("'f' must be a function.");
-    let guesses = guesses
-        .vector()
-        .stop_str("'guesses' must be a vector.")
-        .to_double(pc);
+fn zero(f: &RObject<RFunction>, guesses: &RObject<RVector>, tol: &RObject<RScalar>) -> &RObject {
     if guesses.len() != 2 {
         stop!("'guesses' must be a vector of length two.");
     }
     let (mut x0, mut x1) = {
-        let g = guesses.slice();
+        let g = guesses.to_double(pc).slice();
         (g[0], g[1])
     };
-    let tol = tol.f64().stop_str("'tol' should be a numeric scalar.");
+    let tol = tol.f64();
     if !tol.is_finite() || tol <= 0.0 {
         stop!("'tol' must be a strictly positive value.");
     }
     let x_rval = pc.new_vector_double(1);
     let mut g = |x: f64| {
         let _ = x_rval.set(0, x);
-        let Ok(fx) = f.call1(&x_rval, pc) else {
+        let Ok(fx) = f.call1(x_rval, pc) else {
             stop!("Error in function evaluation.");
         };
-        let fx = fx.f64().stop_str("Unexpected return value  from function.");
+        let fx = fx
+            .scalar()
+            .stop_str("Unexpected return value from function.")
+            .f64();
         if !fx.is_finite() {
             stop!("Non-finite return value from function.");
         }

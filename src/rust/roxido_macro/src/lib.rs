@@ -26,7 +26,7 @@ use std::io::Write;
 use std::path::Path;
 use syn::ext::IdentExt;
 use syn::parse::Parser;
-use syn::Token;
+use syn::{parse_quote, Token};
 
 // See https://doc.rust-lang.org/nomicon/unwinding.html
 //
@@ -112,20 +112,121 @@ fn roxido_fn(options: Vec<NestedMeta>, item_fn: syn::ItemFn) -> TokenStream {
     }
     // Check that all arguments are of type '&RObject'.
     let mut arg_names = Vec::with_capacity(args.len());
+    let mut generated_statements: Vec<syn::Stmt> = Vec::new();
     for arg in &args {
         match arg {
             syn::FnArg::Typed(pat_type) => {
                 let name = &pat_type.pat;
-                arg_names.push(quote!(#name).to_string());
+                let name_as_string = quote!(#name).to_string();
                 let ty = &pat_type.ty;
-                let string = quote!(#ty).to_string();
-                if !( string.starts_with("& ") && string.ends_with(" RObject")) {
-                    panic!("All arguments to a function with the 'roxido' attribute must be of type '&RObject', but found '{}'.", string)
+                let error_msg = || {
+                    panic!("Each argument to a 'roxido' function must be a reference to an RObject, but instead found '{}'.", quote!(#ty))
+                };
+                match ty.as_ref() {
+                    syn::Type::Reference(reference) => {
+                        let ty = &reference.elem;
+                        match ty.as_ref() {
+                            syn::Type::Path(ty) => {
+                                // let path = &ty.path;
+                                let path = quote!(#ty).to_string();
+                                if !path.starts_with("RObject") {
+                                    error_msg();
+                                }
+                                if path.ends_with('>') {
+                                    let Some(snippet) = path.strip_prefix("RObject < ") else {
+                                        error_msg()
+                                    };
+                                    let Some(snippet) = snippet.strip_suffix(" >") else {
+                                        error_msg()
+                                    };
+                                    let tasks: Vec<_> = snippet.split(", ").collect();
+                                    if !(1..=2).contains(&tasks.len()) {
+                                        panic!("The variable '{}' should have at most 2 type parameters.", name_as_string);
+                                    }
+                                    if let Some(&rtype) = tasks.first() {
+                                        match rtype {
+                                            "RScalar" => {
+                                                generated_statements.push(parse_quote! {
+                                                    let #name = #name.scalar().stop_closure(|| format!("'{}' is expected to be a scalar.", stringify!(#name)));
+                                                });
+                                            }
+                                            "RVector" => {
+                                                generated_statements.push(parse_quote! {
+                                                    let #name = #name.vector().stop_closure(|| format!("'{}' is expected to be a vector.", stringify!(#name)));
+                                                });
+                                            }
+                                            "RMatrix" => {
+                                                generated_statements.push(parse_quote! {
+                                                    let #name = #name.matrix().stop_closure(|| format!("'{}' is expected to be a matrix.", stringify!(#name)));
+                                                });
+                                            }
+                                            "RArray" => {
+                                                generated_statements.push(parse_quote! {
+                                                    let #name = #name.array().stop_closure(|| format!("'{}' is expected to be an array.", stringify!(#name)));
+                                                });
+                                            }
+                                            "RFunction" => {
+                                                generated_statements.push(parse_quote! {
+                                                    let #name = #name.function().stop_closure(|| format!("'{}' is expected to be a function.", stringify!(#name)));
+                                                });
+                                            }
+                                            "RExternalPtr" => {
+                                                generated_statements.push(parse_quote! {
+                                                    let #name = #name.external_ptr().stop_closure(|| format!("'{}' is expected to be an external pointer.", stringify!(#name)));
+                                                });
+                                            }
+                                            "RSymbol" => {
+                                                generated_statements.push(parse_quote! {
+                                                    let #name = #name.symbol().stop_closure(|| format!("'{}' is expected to be a symbol.", stringify!(#name)));
+                                                });
+                                            }
+                                            e => {
+                                                panic!("The variable '{}' has '{}' as the first type parameter, but one of the following was expected: RScalar, RVector, RMatrix, RArray, RFunction, RExternalPtr, RSymbol.", name_as_string, e);
+                                            }
+                                        }
+                                    }
+                                    if let Some(&rtype) = tasks.get(1) {
+                                        match rtype {
+                                            "f64" => {
+                                                generated_statements.push(parse_quote! {
+                                                    let #name = #name.double().stop_closure(|| format!("'{}' is expected to have storage mode 'double'.", "#name"));
+                                                });
+                                            }
+                                            "i32" => {
+                                                generated_statements.push(parse_quote! {
+                                                    let #name = #name.integer().stop_closure(|| format!("'{}' is expected to have storage mode 'integer'.", "#name"));
+                                                });
+                                            }
+                                            "u8" => {
+                                                generated_statements.push(parse_quote! {
+                                                    let #name = #name.raw().stop_closure(|| format!("'{}' is expected to have storage mode 'raw'.", "#name"));
+                                                });
+                                            }
+                                            "bool" => {
+                                                generated_statements.push(parse_quote! {
+                                                    let #name = #name.logical().stop_closure(|| format!("'{}' is expected to have storage mode 'logical'.", "#name"));
+                                                });
+                                            }
+                                            "Character" => {
+                                                generated_statements.push(parse_quote! {
+                                                    let #name = #name.character().stop_closure(|| format!("'{}' is expected to have storage mode 'character'.", "#name"));
+                                                });
+                                            }
+                                            e => {
+                                                panic!("The variable '{}' has '{}' as the second type parameter, but one of the following was expected: f64, i32, u8, bool, Character.", name_as_string, e);
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                            _ => error_msg(),
+                        }
+                    }
+                    _ => error_msg(),
                 }
+                arg_names.push(name_as_string);
             }
-            _ => panic!(
-                "All arguments to a function with the 'roxido' attribute must be of type '&RObject'."
-            ),
+            _ => panic!("Each argument to a 'roxido' function must be a reference to an RObject."),
         }
     }
     // Check that return is of type '&RObject'.
@@ -202,6 +303,7 @@ fn roxido_fn(options: Vec<NestedMeta>, item_fn: syn::ItemFn) -> TokenStream {
                 }
                 let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                     let pc = &mut Pc::new();
+                    #( #generated_statements )*
                     let mut f = || { #body };
                     to_sexp(f().to_r(pc))
                 }));
@@ -244,6 +346,7 @@ fn roxido_fn(options: Vec<NestedMeta>, item_fn: syn::ItemFn) -> TokenStream {
                 }
                 let result: Result<crate::rbindings::SEXP, _> = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                     let pc = &mut Pc::new();
+                    #( #generated_statements )*
                     let mut f = || { #body };
                     to_sexp(f().to_r(pc))
                 }));
