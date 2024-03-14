@@ -5,7 +5,7 @@ mod registration {
 use roxido::*;
 
 #[roxido]
-fn convolve2(a: &RObject<RVector, f64>, b: &RObject<RVector, f64>) -> &RObject {
+fn convolve2(a: &RObject<RVector, f64>, b: &RObject<RVector, f64>) {
     let r = pc.new_vector_double(a.len() + b.len() - 1);
     let ab = r.slice_mut();
     for abi in ab.iter_mut() {
@@ -20,7 +20,7 @@ fn convolve2(a: &RObject<RVector, f64>, b: &RObject<RVector, f64>) -> &RObject {
 }
 
 #[roxido]
-fn zero(f: &RObject<RFunction>, guesses: &RObject<RVector>, tol: &RObject<RScalar>) -> &RObject {
+fn zero(f: &RObject<RFunction>, guesses: &RObject<RVector>, tol: f64) {
     if guesses.len() != 2 {
         stop!("'guesses' must be a vector of length two.");
     }
@@ -28,7 +28,6 @@ fn zero(f: &RObject<RFunction>, guesses: &RObject<RVector>, tol: &RObject<RScala
         let g = guesses.to_double(pc).slice();
         (g[0], g[1])
     };
-    let tol = tol.f64();
     if !tol.is_finite() || tol <= 0.0 {
         stop!("'tol' must be a strictly positive value.");
     }
@@ -77,12 +76,12 @@ fn zero(f: &RObject<RFunction>, guesses: &RObject<RVector>, tol: &RObject<RScala
 }
 
 #[roxido]
-fn myrnorm(n: &RObject, mean: &RObject, sd: &RObject) -> &RObject {
+fn myrnorm(n: SEXP, mean: SEXP, sd: SEXP) {
     unsafe {
         use rbindings::*;
         use std::convert::TryFrom;
-        let (mean, sd) = (Rf_asReal(mean.sexp()), Rf_asReal(sd.sexp()));
-        let len_i32 = Rf_asInteger(n.sexp());
+        let (mean, sd) = (Rf_asReal(mean), Rf_asReal(sd));
+        let len_i32 = Rf_asInteger(n);
         let len_isize = isize::try_from(len_i32).unwrap();
         let len_usize = usize::try_from(len_i32).unwrap();
         let vec = Rf_protect(Rf_allocVector(REALSXP, len_isize));

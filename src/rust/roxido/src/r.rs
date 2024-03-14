@@ -1217,14 +1217,20 @@ impl<RMode: Atomic> RObject<RScalar, RMode> {
         if self.is_integer() {
             let x = unsafe { Rf_asInteger(self.sexp()) };
             if x == i32::MIN {
-                Err("Equals NA")
+                Err("i32 equals R's NA for integers")
             } else {
                 Ok(x)
             }
         } else if self.is_double() {
             let y = unsafe { Rf_asReal(self.sexp()) };
-            if y > f64::from(i32::MAX) || y <= f64::from(i32::MIN) || y.is_nan() {
-                Err("Greater than maximum i32, equals NA, less than minimum i32, or equals NaN")
+            if y > f64::from(i32::MAX) {
+                Err("Greater than maximum integer value")
+            } else if y < f64::from(i32::MIN) {
+                Err("Less than minimum integer value")
+            } else if y == f64::from(i32::MIN) {
+                Err("Equals R's NA for integers")
+            } else if y.is_nan() {
+                Err("Equals R's NaN")
             } else {
                 Ok(y.round() as i32)
             }
@@ -1233,12 +1239,12 @@ impl<RMode: Atomic> RObject<RScalar, RMode> {
         } else if self.is_logical() {
             let y = unsafe { Rf_asLogical(self.sexp()) };
             if y == i32::MIN {
-                Err("Equals NA")
+                Err("Equals R's NA for logical")
             } else {
                 Ok(y)
             }
         } else {
-            Err("Unsupported type")
+            Err("Unsupported R type")
         }
     }
 
@@ -1246,27 +1252,37 @@ impl<RMode: Atomic> RObject<RScalar, RMode> {
     pub fn usize(&self) -> Result<usize, &'static str> {
         if self.is_integer() {
             let x = unsafe { Rf_asInteger(self.sexp()) };
-            usize::try_from(x).map_err(|_| "Cannot map to usize")
+            if x == i32::MIN {
+                Err("Equals R's NA for integers")
+            } else if x < 0 {
+                Err("Negative value not expected")
+            } else {
+                usize::try_from(x).map_err(|_| "Cannot convert to usize")
+            }
         } else if self.is_double() {
             let y = unsafe { Rf_asReal(self.sexp()) };
-            let z = y as usize;
-            if z as f64 == y {
-                Ok(z)
+            if y < 0.0 {
+                Err("Negative value not expected")
             } else {
-                Err("Conversion error for usize")
+                let z = y as usize;
+                if z as f64 == y {
+                    Ok(z)
+                } else {
+                    Err("Cannot convert to usize")
+                }
             }
         } else if self.is_raw() {
             let x = unsafe { Rf_asInteger(self.sexp()) };
-            usize::try_from(x).map_err(|_| "Cannot map to usize")
+            usize::try_from(x).map_err(|_| "Cannot convert to usize")
         } else if self.is_logical() {
             let x = unsafe { Rf_asLogical(self.sexp()) };
             if x == i32::MIN {
-                Err("Equals NA")
+                Err("Equals R's NA for logical")
             } else {
-                usize::try_from(x).map_err(|_| "Cannot map to usize")
+                usize::try_from(x).map_err(|_| "Cannot convert to usize")
             }
         } else {
-            Err("Unsupported type")
+            Err("Unsupported R type")
         }
     }
 
@@ -1274,27 +1290,31 @@ impl<RMode: Atomic> RObject<RScalar, RMode> {
     pub fn u8(&self) -> Result<u8, &'static str> {
         if self.is_integer() {
             let x = unsafe { Rf_asInteger(self.sexp()) };
-            u8::try_from(x).map_err(|_| "Cannot map to u8")
+            u8::try_from(x).map_err(|_| "Cannot convert to u8")
         } else if self.is_double() {
             let y = unsafe { Rf_asReal(self.sexp()) };
-            let z = y as u8;
-            if z as f64 == y {
-                Ok(z)
+            if y < 0.0 {
+                Err("Negative value not expected")
             } else {
-                Err("Conversion error to u8")
+                let z = y as u8;
+                if z as f64 == y {
+                    Ok(z)
+                } else {
+                    Err("Cannot convert to u8")
+                }
             }
         } else if self.is_raw() {
             let x = unsafe { Rf_asInteger(self.sexp()) };
-            u8::try_from(x).map_err(|_| "Cannot map to u8")
+            u8::try_from(x).map_err(|_| "Cannot convert to u8")
         } else if self.is_logical() {
             let x = unsafe { Rf_asLogical(self.sexp()) };
             if x == i32::MIN {
-                Err("Equals R's NA for bool")
+                Err("Equals R's NA for logical")
             } else {
-                u8::try_from(x).map_err(|_| "Cannot map to usize")
+                u8::try_from(x).map_err(|_| "Cannot convert to u8")
             }
         } else {
-            Err("Unsupported type")
+            Err("Unsupported R type")
         }
     }
 
@@ -1303,14 +1323,16 @@ impl<RMode: Atomic> RObject<RScalar, RMode> {
         if self.is_integer() {
             let x = unsafe { Rf_asInteger(self.sexp()) };
             if x == i32::MIN {
-                Err("Equals NA")
+                Err("Equals R's NA for integers")
             } else {
                 Ok(x != 0)
             }
         } else if self.is_double() {
             let y = unsafe { Rf_asReal(self.sexp()) };
-            if Pc::is_na_double(y) || Pc::is_nan(y) {
-                Err("Equal NA or NaN")
+            if Pc::is_na_double(y) {
+                Err("Equals R's NA for doubles")
+            } else if Pc::is_nan(y) {
+                Err("Equals R's NaN")
             } else {
                 Ok(y != 0.0)
             }
@@ -1319,27 +1341,19 @@ impl<RMode: Atomic> RObject<RScalar, RMode> {
         } else if self.is_logical() {
             let y = unsafe { Rf_asLogical(self.sexp()) };
             if y == i32::MIN {
-                Err("Equals NA")
+                Err("Equals R's NA for logical")
             } else {
                 Ok(y != 0)
             }
         } else {
-            Err("Unsupported type")
+            Err("Unsupported R type")
         }
     }
 
     /// Check if appropriate to characterize as a str reference.
     pub fn to_str<'a>(&self, pc: &'a Pc) -> Result<&'a str, &'static str> {
-        if self.is_vector() {
-            let s: &RObject<RVector> = self.transmute();
-            if s.is_scalar() {
-                s.to_character(pc).get(0)
-            } else {
-                Err("Not a scalar")
-            }
-        } else {
-            Err("Not a vector")
-        }
+        let s: &RObject<RVector, RCharacter> = self.to_character(pc).transmute();
+        s.get(0)
     }
 
     /// Manipulates the matrix in place to be a vector by dropping the `dim` attribute.

@@ -108,7 +108,7 @@ fn roxido_fn(options: Vec<NestedMeta>, item_fn: syn::ItemFn) -> TokenStream {
     // Check that visibility is okay.
     let vis_as_string = quote!(#vis).to_string();
     if !vis_as_string.is_empty() {
-        panic!("A function with the 'roxido' attribute must not have a visibility modifier, but found '{}'.", vis_as_string);
+        panic!("A function with the 'roxido' attribute may not have a visibility modifier, but found '{}'", vis_as_string);
     }
     // Check that all arguments are of type '&RObject'.
     let mut arg_names = Vec::with_capacity(args.len());
@@ -120,44 +120,77 @@ fn roxido_fn(options: Vec<NestedMeta>, item_fn: syn::ItemFn) -> TokenStream {
                 let name_as_string = quote!(#name).to_string();
                 let ty = &pat_type.ty;
                 let error_msg = || {
-                    panic!("Each argument to a 'roxido' function must be a reference to an RObject, but instead found '{}'.", quote!(#ty))
+                    panic!("'{}' is of type '{}', but arguments to 'roxido' functions must be of type &RObject, &RObject<A,B>, SEXP, f64, i32, usize, u8, bool, or &str", name_as_string, quote!(#ty))
                 };
                 match ty.as_ref() {
+                    syn::Type::Path(path) => {
+                        let ty = &path.path;
+                        let path = quote!(#ty).to_string();
+                        match path.as_ref() {
+                            "SEXP" => {}
+                            "f64" => {
+                                generated_statements.push(parse_quote! { let #name = pc.transmute_sexp::<RAnyType, RUnknown>(#name).scalar().stop_str(concat!("'", stringify!(#name),"' is expected to be a scalar")).f64(); });
+                            }
+                            "i32" => {
+                                generated_statements.push(parse_quote! { let #name = pc.transmute_sexp::<RAnyType, RUnknown>(#name).scalar().stop_str(concat!("'", stringify!(#name),"' is expected to be a scalar")).i32().map_err(|x| format!(concat!("'", stringify!(#name), "' cannot be an integer: {}"), x)).stop(); });
+                            }
+                            "usize" => {
+                                generated_statements.push(parse_quote! { let #name = pc.transmute_sexp::<RAnyType, RUnknown>(#name).scalar().stop_str(concat!("'", stringify!(#name),"' is expected to be a scalar")).usize().map_err(|x| format!(concat!("'", stringify!(#name), "' cannot be a usize: {}"), x)).stop(); });
+                            }
+                            "u8" => {
+                                generated_statements.push(parse_quote! { let #name = pc.transmute_sexp::<RAnyType, RUnknown>(#name).scalar().stop_str(concat!("'", stringify!(#name),"' is expected to be a scalar")).u8().map_err(|x| format!(concat!("'", stringify!(#name), "' cannot be a raw: {}"), x)).stop(); });
+                            }
+                            "bool" => {
+                                generated_statements.push(parse_quote! { let #name = pc.transmute_sexp::<RAnyType, RUnknown>(#name).scalar().stop_str(concat!("'", stringify!(#name),"' is expected to be a scalar")).bool().map_err(|x| format!(concat!("'", stringify!(#name), "' cannot be a logical: {}"), x)).stop(); });
+                            }
+                            _ => {
+                                error_msg();
+                            }
+                        }
+                    }
                     syn::Type::Reference(reference) => {
                         let ty = &reference.elem;
                         match ty.as_ref() {
                             syn::Type::Path(ty) => {
-                                // let path = &ty.path;
                                 let path = quote!(#ty).to_string();
                                 if !path.starts_with("RObject") {
-                                    error_msg();
-                                }
-                                if path.ends_with('>') {
+                                    if path == "str" {
+                                        generated_statements.push(parse_quote! { let #name = pc.transmute_sexp::<RAnyType, RUnknown>(#name).scalar().stop_str(concat!("'", stringify!(#name),"' is expected to be a scalar")).to_str(pc).map_err(|x| format!(concat!("'", stringify!(#name), "' cannot be a string: {}"), x)).stop(); });
+                                    } else {
+                                        error_msg();
+                                    }
+                                } else if path.ends_with('>') {
                                     let Some(snippet) = path.strip_prefix("RObject < ") else {
                                         error_msg()
                                     };
                                     let Some(snippet) = snippet.strip_suffix(" >") else {
                                         error_msg()
                                     };
+                                    generated_statements.push(parse_quote! {
+                                        let #name = pc.transmute_sexp_generic(#name);
+                                    });
                                     let tasks: Vec<_> = snippet.split(", ").collect();
                                     if !(1..=2).contains(&tasks.len()) {
-                                        panic!("The variable '{}' should have at most 2 type parameters.", name_as_string);
+                                        panic!(
+                                            "'{}' should have at most 2 type parameters",
+                                            name_as_string
+                                        );
                                     }
                                     if let Some(&rtype) = tasks.first() {
                                         match rtype {
                                             "RScalar" => {
                                                 generated_statements.push(parse_quote! {
-                                                    let #name = #name.scalar().stop_closure(|| format!("'{}' is expected to be a scalar.", stringify!(#name)));
+let #name = #name.scalar().stop_closure(|| format!("'{}' is expected to be a scalar", stringify!(#name)));
                                                 });
                                             }
                                             "RVector" => {
                                                 generated_statements.push(parse_quote! {
-                                                    let #name = #name.vector().stop_closure(|| format!("'{}' is expected to be a vector.", stringify!(#name)));
+let #name = #name.vector().stop_closure(|| format!("'{}' is expected to be a vector", stringify!(#name)));
                                                 });
                                             }
                                             "RMatrix" => {
                                                 generated_statements.push(parse_quote! {
-                                                    let #name = #name.matrix().stop_closure(|| format!("'{}' is expected to be a matrix.", stringify!(#name)));
+let #name = #name.matrix().stop_closure(|| format!("'{}' is expected to be a matrix", stringify!(#name)));
                                                 });
                                             }
                                             "RArray" => {
@@ -167,21 +200,21 @@ fn roxido_fn(options: Vec<NestedMeta>, item_fn: syn::ItemFn) -> TokenStream {
                                             }
                                             "RFunction" => {
                                                 generated_statements.push(parse_quote! {
-                                                    let #name = #name.function().stop_closure(|| format!("'{}' is expected to be a function.", stringify!(#name)));
+let #name = #name.function().stop_closure(|| format!("'{}' is expected to be a function", stringify!(#name)));
                                                 });
                                             }
                                             "RExternalPtr" => {
                                                 generated_statements.push(parse_quote! {
-                                                    let #name = #name.external_ptr().stop_closure(|| format!("'{}' is expected to be an external pointer.", stringify!(#name)));
+let #name = #name.external_ptr().stop_closure(|| format!("'{}' is expected to be an external pointer", stringify!(#name)));
                                                 });
                                             }
                                             "RSymbol" => {
                                                 generated_statements.push(parse_quote! {
-                                                    let #name = #name.symbol().stop_closure(|| format!("'{}' is expected to be a symbol.", stringify!(#name)));
+let #name = #name.symbol().stop_closure(|| format!("'{}' is expected to be a symbol", stringify!(#name)));
                                                 });
                                             }
                                             e => {
-                                                panic!("The variable '{}' has '{}' as the first type parameter, but one of the following was expected: RScalar, RVector, RMatrix, RArray, RFunction, RExternalPtr, RSymbol.", name_as_string, e);
+                                                panic!("'{}' has '{}' as the first type parameter, but one of the following was expected: RScalar, RVector, RMatrix, RArray, RFunction, RExternalPtr, RSymbol", name_as_string, e);
                                             }
                                         }
                                     }
@@ -189,31 +222,31 @@ fn roxido_fn(options: Vec<NestedMeta>, item_fn: syn::ItemFn) -> TokenStream {
                                         match rtype {
                                             "f64" => {
                                                 generated_statements.push(parse_quote! {
-                                                    let #name = #name.double().stop_closure(|| format!("'{}' is expected to have storage mode 'double'.", "#name"));
+let #name = #name.double().stop_closure(|| format!("'{}' is expected to have storage mode 'double'", "#name"));
                                                 });
                                             }
                                             "i32" => {
                                                 generated_statements.push(parse_quote! {
-                                                    let #name = #name.integer().stop_closure(|| format!("'{}' is expected to have storage mode 'integer'.", "#name"));
+let #name = #name.integer().stop_closure(|| format!("'{}' is expected to have storage mode 'integer'", "#name"));
                                                 });
                                             }
                                             "u8" => {
                                                 generated_statements.push(parse_quote! {
-                                                    let #name = #name.raw().stop_closure(|| format!("'{}' is expected to have storage mode 'raw'.", "#name"));
+let #name = #name.raw().stop_closure(|| format!("'{}' is expected to have storage mode 'raw'", "#name"));
                                                 });
                                             }
                                             "bool" => {
                                                 generated_statements.push(parse_quote! {
-                                                    let #name = #name.logical().stop_closure(|| format!("'{}' is expected to have storage mode 'logical'.", "#name"));
+let #name = #name.logical().stop_closure(|| format!("'{}' is expected to have storage mode 'logical'", "#name"));
                                                 });
                                             }
                                             "Character" => {
                                                 generated_statements.push(parse_quote! {
-                                                    let #name = #name.character().stop_closure(|| format!("'{}' is expected to have storage mode 'character'.", "#name"));
+let #name = #name.character().stop_closure(|| format!("'{}' is expected to have storage mode 'character'", "#name"));
                                                 });
                                             }
                                             e => {
-                                                panic!("The variable '{}' has '{}' as the second type parameter, but one of the following was expected: f64, i32, u8, bool, Character.", name_as_string, e);
+                                                panic!("'{}' has '{}' as the second type parameter, but one of the following was expected: f64, i32, u8, bool, Character", name_as_string, e);
                                             }
                                         }
                                     }
@@ -226,17 +259,27 @@ fn roxido_fn(options: Vec<NestedMeta>, item_fn: syn::ItemFn) -> TokenStream {
                 }
                 arg_names.push(name_as_string);
             }
-            _ => panic!("Each argument to a 'roxido' function must be a reference to an RObject."),
+            _ => panic!("Each argument to a 'roxido' function must be of type &RObject, &RObject<A,B>, SEXP, f64, i32, usize, u8, bool, or &str")
         }
+    }
+    let mut new_args = args.clone();
+    new_args.clear();
+    for arg in &args {
+        let syn::FnArg::Typed(x) = arg else {
+            panic!("Unexpected type arguments");
+        };
+        let mut y = x.clone();
+        y.ty = Box::new(syn::parse_str::<syn::Type>("crate::rbindings::SEXP").unwrap());
+        new_args.push(syn::FnArg::Typed(y));
     }
     // Check that return is of type '&RObject'.
     match &output {
         syn::ReturnType::Default => {}
         syn::ReturnType::Type(_, tipe) => {
             let tipe_as_string = quote!(#tipe).to_string();
-            if tipe_as_string != "& RObject" {
+            if tipe_as_string != "& RObject" && tipe_as_string != "SEXP" {
                 panic!(
-                    "A function with the 'roxido' attribute always implicitly returns '&RObject', but found '{}'.",
+                    "A function with the 'roxido' attribute always implicitly returns an '&RObject' or 'SEXP', but found '{}'",
                     tipe_as_string
                 );
             }
@@ -297,25 +340,20 @@ fn roxido_fn(options: Vec<NestedMeta>, item_fn: syn::ItemFn) -> TokenStream {
         TokenStream::from(quote! {
             #[allow(clippy::useless_transmute)]
             #[no_mangle]
-            extern "C" fn #name(#args) -> crate::rbindings::SEXP {
-                fn to_sexp<RType, RMode>(x: &RObject<RType, RMode>) -> crate::rbindings::SEXP {
-                    unsafe { std::mem::transmute::<&RObject<RType, RMode>, crate::rbindings::SEXP>(x) }
-                }
+            extern "C" fn #name(#new_args) -> crate::rbindings::SEXP {
                 let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                     let pc = &mut Pc::new();
                     #( #generated_statements )*
                     let mut f = || { #body };
-                    to_sexp(f().to_r(pc))
+                    f().to_r(pc).sexp()
                 }));
                 match result {
                     Ok(obj) => obj,
                     Err(ref payload) => {
-                        let mut scratch = String::new();
                         let msg = match payload.downcast_ref::<crate::stop::RStopHelper>() {
                             Some(x) => x.0.as_str(),
                             None => {
-                                scratch = format!("Panic in Rust function '{}' with 'roxido' attribute.", stringify!(#name));
-                                &scratch[..]
+                                concat!("Panic in Rust function '", stringify!(#name),"' with 'roxido' attribute")
                             }
                         };
                         let len = msg.len();
@@ -326,12 +364,11 @@ fn roxido_fn(options: Vec<NestedMeta>, item_fn: syn::ItemFn) -> TokenStream {
                                 msg.len().try_into().unwrap(),
                             )
                         };
-                        drop(scratch);
                         drop(result);
                         unsafe {
                             crate::rbindings::Rf_error(b"%.*s\0".as_ptr() as *const std::os::raw::c_char, len, crate::rbindings::R_CHAR(sexp));
                         }
-                        to_sexp(crate::Pc::null()) // We never get here.
+                        crate::Pc::null().sexp()  // We never get here.
                     }
                 }
             }
@@ -340,21 +377,18 @@ fn roxido_fn(options: Vec<NestedMeta>, item_fn: syn::ItemFn) -> TokenStream {
         TokenStream::from(quote! {
             #[allow(clippy::useless_transmute)]
             #[no_mangle]
-            extern "C" fn #name(#args) -> crate::rbindings::SEXP {
-                fn to_sexp<RType, RMode>(x: &RObject<RType, RMode>) -> crate::rbindings::SEXP {
-                    unsafe { std::mem::transmute::<&RObject<RType, RMode>, crate::rbindings::SEXP>(x) }
-                }
+            extern "C" fn #name(#new_args) -> crate::rbindings::SEXP {
                 let result: Result<crate::rbindings::SEXP, _> = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                     let pc = &mut Pc::new();
                     #( #generated_statements )*
                     let mut f = || { #body };
-                    to_sexp(f().to_r(pc))
+                    f().to_r(pc).sexp()
                 }));
                 match result {
                     Ok(obj) => obj,
                     Err(_) => {
                         let pc = &mut crate::Pc::new();
-                        to_sexp(pc.new_error(format!("Panic in Rust function '{}' with 'roxido' attribute.", stringify!(#name)).as_str()))
+                        pc.new_error(concat!("Panic in Rust function '",stringify!(#name),"' with 'roxido' attribute")).sexp()
                     }
                 }
             }
