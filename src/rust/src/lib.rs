@@ -5,14 +5,14 @@ mod registration {
 use roxido::*;
 
 #[roxido]
-fn convolve2(a: &RObject<RVector, f64>, b: &RObject<RVector, f64>) {
+fn convolve2(a: &RObject<RVector, RAtomic>, b: &RObject<RVector, RAtomic>) {
     let r = pc.new_vector_double(a.len() + b.len() - 1);
     let ab = r.slice_mut();
     for abi in ab.iter_mut() {
         *abi = 0.0;
     }
-    for (i, ai) in a.slice().iter().enumerate() {
-        for (j, bj) in b.slice().iter().enumerate() {
+    for (i, ai) in a.to_double(pc).slice().iter().enumerate() {
+        for (j, bj) in b.to_double(pc).slice().iter().enumerate() {
             ab[i + j] += ai * bj;
         }
     }
@@ -20,14 +20,7 @@ fn convolve2(a: &RObject<RVector, f64>, b: &RObject<RVector, f64>) {
 }
 
 #[roxido]
-fn zero(f: &RObject<RFunction>, guesses: &RObject<RVector>, tol: f64) {
-    if guesses.len() != 2 {
-        stop!("'guesses' must be a vector of length two.");
-    }
-    let (mut x0, mut x1) = {
-        let g = guesses.to_double(pc).slice();
-        (g[0], g[1])
-    };
+fn zero(f: &RObject<RFunction>, guess1: f64, guess2: f64, tol: f64) {
     if !tol.is_finite() || tol <= 0.0 {
         stop!("'tol' must be a strictly positive value.");
     }
@@ -46,6 +39,7 @@ fn zero(f: &RObject<RFunction>, guesses: &RObject<RVector>, tol: f64) {
         }
         fx
     };
+    let (mut x0, mut x1) = (guess1, guess2);
     let mut f0 = g(x0);
     if f0 == 0.0 {
         return x0.to_r(pc);
@@ -55,7 +49,7 @@ fn zero(f: &RObject<RFunction>, guesses: &RObject<RVector>, tol: f64) {
         return x1.to_r(pc);
     }
     if f0 * f1 > 0.0 {
-        stop!("Oops, guesses[0] and guesses[1] have the same sign.");
+        stop!("Oops, guesses1 and guesses2 have the same sign.");
     }
     loop {
         let xc = 0.5 * (x0 + x1);
