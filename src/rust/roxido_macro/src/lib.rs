@@ -113,9 +113,16 @@ fn roxido_fn(options: Vec<NestedMeta>, item_fn: syn::ItemFn) -> TokenStream {
     // Check that all arguments are of type '&RObject'.
     let mut arg_names = Vec::with_capacity(args.len());
     let mut generated_statements: Vec<syn::Stmt> = Vec::new();
+    let mut new_args = args.clone();
+    new_args.clear();
     for arg in &args {
         match arg {
             syn::FnArg::Typed(pat_type) => {
+                {
+                    let mut y = pat_type.clone();
+                    y.ty = Box::new(syn::parse_str::<syn::Type>("crate::rbindings::SEXP").unwrap());
+                    new_args.push(syn::FnArg::Typed(y));
+                }
                 let name = &pat_type.pat;
                 let name_as_string = quote!(#name).to_string();
                 let ty = &pat_type.ty;
@@ -167,7 +174,7 @@ fn roxido_fn(options: Vec<NestedMeta>, item_fn: syn::ItemFn) -> TokenStream {
                                         error_msg()
                                     };
                                     generated_statements.push(parse_quote! {
-                                        let #name = pc.transmute_sexp_generic(#name);
+                                        let #name = pc.transmute_sexp::<RAnyType, RUnknown>(#name);
                                     });
                                     let tasks: Vec<_> = snippet.split(", ").collect();
                                     if !(1..=2).contains(&tasks.len()) {
@@ -261,16 +268,6 @@ let #name = #name.character().stop_closure(|| format!("'{}' is expected to have 
             }
             _ => panic!("Each argument to a 'roxido' function must be of type &RObject, &RObject<A,B>, SEXP, f64, i32, usize, u8, bool, or &str")
         }
-    }
-    let mut new_args = args.clone();
-    new_args.clear();
-    for arg in &args {
-        let syn::FnArg::Typed(x) = arg else {
-            panic!("Unexpected type arguments");
-        };
-        let mut y = x.clone();
-        y.ty = Box::new(syn::parse_str::<syn::Type>("crate::rbindings::SEXP").unwrap());
-        new_args.push(syn::FnArg::Typed(y));
     }
     // Check that return is of type '&RObject'.
     match &output {
