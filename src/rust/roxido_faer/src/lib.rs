@@ -1,12 +1,11 @@
 use faer::MatRef;
-use roxido::r::Matrix;
 use roxido::*;
 
 pub trait RMatrix2Faer {
     fn as_faer(&self) -> Result<MatRef<'static, f64>, &'static str>;
 }
 
-impl RMatrix2Faer for RObject<Matrix, f64> {
+impl RMatrix2Faer for RObject<RMatrix, f64> {
     fn as_faer(&self) -> Result<MatRef<'static, f64>, &'static str> {
         Ok({
             let nrow = self.nrow();
@@ -27,8 +26,8 @@ pub trait ToR1<'a, RType, RMode> {
     fn to_r(&self, pc: &'a Pc) -> &'a RObject<RType, RMode>;
 }
 
-impl<'a> ToR1<'a, Matrix, f64> for MatRef<'a, f64> {
-    fn to_r(&self, pc: &'a Pc) -> &'a RObject<Matrix, f64> {
+impl<'a> ToR1<'a, RMatrix, f64> for MatRef<'a, f64> {
+    fn to_r(&self, pc: &'a Pc) -> &'a RObject<RMatrix, f64> {
         let nr = self.nrows();
         let nc = self.ncols();
         let result = pc.new_matrix_double(nr, nc);
