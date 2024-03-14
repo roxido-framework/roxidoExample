@@ -125,6 +125,9 @@ fn roxido_fn(options: Vec<NestedMeta>, item_fn: syn::ItemFn) -> TokenStream {
                 }
                 let name = &pat_type.pat;
                 let name_as_string = quote!(#name).to_string();
+                if let Some(name_as_string) = name_as_string.strip_prefix("mut ") {
+                    panic!("'{}' is marked as mutable, but arguments to 'roxido' functions cannot be mutable", name_as_string);
+                }
                 let ty = &pat_type.ty;
                 let error_msg = || {
                     panic!("'{}' is of type '{}', but arguments to 'roxido' functions must be of type &RObject, &RObject<A,B>, SEXP, f64, i32, usize, u8, bool, or &str", name_as_string, quote!(#ty))
