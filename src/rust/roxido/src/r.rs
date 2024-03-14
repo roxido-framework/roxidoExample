@@ -540,7 +540,7 @@ impl<RType, RMode> RObject<RType, RMode> {
 
     /// Check if appropriate to characterize as an RObject<RMatrix>.
     /// Checks using R's `Rf_isMatrix` function.
-    pub fn matrix(&self) -> Result<&RObject<RMatrix>, &'static str> {
+    pub fn matrix(&self) -> Result<&RObject<RMatrix, RAtomic>, &'static str> {
         if self.is_matrix() {
             Ok(self.transmute())
         } else {
@@ -550,7 +550,7 @@ impl<RType, RMode> RObject<RType, RMode> {
 
     /// Check if appropriate to characterize as an RObject<RMatrix>.
     /// Checks using R's `Rf_isMatrix` function.
-    pub fn matrix_mut(&mut self) -> Result<&mut RObject<RMatrix>, &'static str> {
+    pub fn matrix_mut(&mut self) -> Result<&mut RObject<RMatrix, RAtomic>, &'static str> {
         if self.is_matrix() {
             Ok(self.transmute_mut())
         } else {
