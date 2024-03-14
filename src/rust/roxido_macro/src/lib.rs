@@ -167,6 +167,9 @@ fn roxido_fn(options: Vec<NestedMeta>, item_fn: syn::ItemFn) -> TokenStream {
                                         error_msg();
                                     }
                                 } else {
+                                    if reference.lifetime.is_some() {
+                                        panic!("'{}' has a lifetime, which is not supported for a 'roxido' function.", name_as_string);
+                                    }
                                     let mutable = reference.mutability.is_some();
                                     if mutable {
                                         generated_statements.push(parse_quote! {
