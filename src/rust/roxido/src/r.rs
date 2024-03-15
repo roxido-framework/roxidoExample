@@ -461,10 +461,10 @@ impl<RType, RMode> RObject<RType, RMode> {
         unsafe { &*sexp.cast::<RObject<RTypeTo, RModeTo>>() }
     }
 
-    fn transmute_sexp_mut<RTypeTo, RModeTo>(
-        &mut self,
+    fn transmute_sexp_mut<'a, 'b, RTypeTo, RModeTo>(
+        &'a mut self,
         sexp: SEXP,
-    ) -> &mut RObject<RTypeTo, RModeTo> {
+    ) -> &'b mut RObject<RTypeTo, RModeTo> {
         unsafe { &mut *sexp.cast::<RObject<RTypeTo, RModeTo>>() }
     }
 
@@ -472,8 +472,8 @@ impl<RType, RMode> RObject<RType, RMode> {
         unsafe { std::mem::transmute::<&Self, &RObject<RTypeTo, RModeTo>>(self) }
     }
 
-    fn transmute_mut<RTypeTo, RModeTo>(&mut self) -> &mut RObject<RTypeTo, RModeTo> {
-        unsafe { std::mem::transmute::<&mut Self, &mut RObject<RTypeTo, RModeTo>>(self) }
+    fn transmute_mut<'a, 'b, RTypeTo, RModeTo>(&'a mut self) -> &'b mut RObject<RTypeTo, RModeTo> {
+        unsafe { std::mem::transmute::<&'a mut Self, &'b mut RObject<RTypeTo, RModeTo>>(self) }
     }
 
     /// Duplicate an object.
@@ -511,7 +511,7 @@ impl<RType, RMode> RObject<RType, RMode> {
         }
     }
 
-    pub fn scalar_mut(&mut self) -> Result<&mut RObject<RScalar>, &'static str> {
+    pub fn scalar_mut<'a, 'b>(&'a mut self) -> Result<&'b mut RObject<RScalar>, &'static str> {
         let s = self.vector()?;
         if s.is_scalar() {
             Ok(self.transmute_mut())
@@ -528,7 +528,7 @@ impl<RType, RMode> RObject<RType, RMode> {
         }
     }
 
-    pub fn vector_mut(&mut self) -> Result<&mut RObject<RVector>, &'static str> {
+    pub fn vector_mut<'a, 'b>(&'a mut self) -> Result<&'b mut RObject<RVector>, &'static str> {
         if self.is_vector() {
             Ok(self.transmute_mut())
         } else {
@@ -548,7 +548,7 @@ impl<RType, RMode> RObject<RType, RMode> {
 
     /// Check if appropriate to characterize as an RObject<RMatrix>.
     /// Checks using R's `Rf_isMatrix` function.
-    pub fn matrix_mut(&mut self) -> Result<&mut RObject<RMatrix>, &'static str> {
+    pub fn matrix_mut<'a, 'b>(&'a mut self) -> Result<&'b mut RObject<RMatrix>, &'static str> {
         if self.is_matrix() {
             Ok(self.transmute_mut())
         } else {
@@ -568,7 +568,7 @@ impl<RType, RMode> RObject<RType, RMode> {
 
     /// Check if appropriate to characterize as an RObject<RArray>.
     /// Checks using R's `Rf_isArray` function.
-    pub fn array_mut(&mut self) -> Result<&mut RObject<RArray>, &'static str> {
+    pub fn array_mut<'a, 'b>(&'a mut self) -> Result<&'b mut RObject<RArray>, &'static str> {
         if self.is_array() {
             Ok(self.transmute_mut())
         } else {
@@ -588,7 +588,7 @@ impl<RType, RMode> RObject<RType, RMode> {
 
     /// Check if appropriate to characterize as an RObject<RVector, RList>.
     /// Checks using R's `Rf_isVectorList` function.
-    pub fn list_mut(&mut self) -> Result<&mut RObject<RList>, &'static str> {
+    pub fn list_mut<'a, 'b>(&'a mut self) -> Result<&'b mut RObject<RList>, &'static str> {
         if self.is_list() {
             Ok(self.transmute_mut())
         } else {
@@ -608,7 +608,9 @@ impl<RType, RMode> RObject<RType, RMode> {
 
     /// Check if appropriate to characterize as an RObject<RVector, RDataFrame>.
     /// Checks using R's `Rf_isFrame` function.
-    pub fn data_frame_mut(&mut self) -> Result<&mut RObject<RList, RDataFrame>, &'static str> {
+    pub fn data_frame_mut<'a, 'b>(
+        &'a mut self,
+    ) -> Result<&'b mut RObject<RList, RDataFrame>, &'static str> {
         if self.is_data_frame() {
             Ok(self.transmute_mut())
         } else {
@@ -628,7 +630,7 @@ impl<RType, RMode> RObject<RType, RMode> {
 
     /// Check if appropriate to characterize as an RObject<RFunction>.
     /// Checks using R's `Rf_isFunction` function.
-    pub fn function_mut(&mut self) -> Result<&mut RObject<RFunction>, &'static str> {
+    pub fn function_mut<'a, 'b>(&'a mut self) -> Result<&'b mut RObject<RFunction>, &'static str> {
         if self.is_function() {
             Ok(self.transmute_mut())
         } else {
@@ -648,7 +650,9 @@ impl<RType, RMode> RObject<RType, RMode> {
 
     /// Check if appropriate to characterize as an RObject<RExternalPtr>.
     /// Uses the SEXP type to determine if this is possible.
-    pub fn external_ptr_mut(&mut self) -> Result<&mut RObject<RExternalPtr>, &'static str> {
+    pub fn external_ptr_mut<'a, 'b>(
+        &'a mut self,
+    ) -> Result<&'b mut RObject<RExternalPtr>, &'static str> {
         if self.is_external_ptr() {
             Ok(self.transmute_mut())
         } else {
@@ -668,7 +672,7 @@ impl<RType, RMode> RObject<RType, RMode> {
 
     /// Check if appropriate to characterize as an RObject<RExternalPtr>.
     /// Uses the SEXP type to determine if this is possible.
-    pub fn symbol_mut(&mut self) -> Result<&mut RObject<RSymbol>, &'static str> {
+    pub fn symbol_mut<'a, 'b>(&'a mut self) -> Result<&'b mut RObject<RSymbol>, &'static str> {
         if self.is_symbol() {
             Ok(self.transmute_mut())
         } else {
@@ -817,7 +821,7 @@ impl<RType: RAtomic + RHasLength, RMode> RObject<RType, RMode> {
     }
 
     /// Check if appropriate to characterize storage mode as "double".
-    pub fn double_mut(&mut self) -> Result<&mut RObject<RType, f64>, &'static str> {
+    pub fn double_mut<'a, 'b>(&'a mut self) -> Result<&'b mut RObject<RType, f64>, &'static str> {
         if self.is_double() {
             Ok(self.transmute_mut())
         } else {
@@ -841,7 +845,7 @@ impl<RType: RAtomic + RHasLength, RMode> RObject<RType, RMode> {
     }
 
     /// Attempts to coerce storage mode to "double".
-    pub fn to_double_mut<'a>(&'a mut self, pc: &'a Pc) -> &'a mut RObject<RType, f64> {
+    pub fn to_double_mut<'a, 'b>(&'a mut self, pc: &Pc) -> &'b mut RObject<RType, f64> {
         if self.is_double() {
             self.transmute_mut()
         } else {
@@ -860,7 +864,7 @@ impl<RType: RAtomic + RHasLength, RMode> RObject<RType, RMode> {
     }
 
     /// Check if appropriate to characterize storage mode as "double".
-    pub fn integer_mut(&mut self) -> Result<&mut RObject<RType, i32>, &'static str> {
+    pub fn integer_mut<'a, 'b>(&'a mut self) -> Result<&'b mut RObject<RType, i32>, &'static str> {
         if self.is_integer() {
             Ok(self.transmute_mut())
         } else {
@@ -884,7 +888,7 @@ impl<RType: RAtomic + RHasLength, RMode> RObject<RType, RMode> {
     }
 
     /// Attempts to coerce storage mode to "double".
-    pub fn to_integer_mut<'a>(&'a mut self, pc: &'a Pc) -> &'a mut RObject<RType, i32> {
+    pub fn to_integer_mut<'a, 'b>(&'a mut self, pc: &Pc) -> &'b mut RObject<RType, i32> {
         if self.is_integer() {
             self.transmute_mut()
         } else {
@@ -903,7 +907,7 @@ impl<RType: RAtomic + RHasLength, RMode> RObject<RType, RMode> {
     }
 
     /// Check if appropriate to characterize storage mode as "double".
-    pub fn raw_mut(&mut self) -> Result<&mut RObject<RType, u8>, &'static str> {
+    pub fn raw_mut<'a, 'b>(&'a mut self) -> Result<&'b mut RObject<RType, u8>, &'static str> {
         if self.is_raw() {
             Ok(self.transmute_mut())
         } else {
@@ -927,7 +931,7 @@ impl<RType: RAtomic + RHasLength, RMode> RObject<RType, RMode> {
     }
 
     /// Attempts to coerce storage mode to "double".
-    pub fn to_raw_mut<'a>(&'a mut self, pc: &'a Pc) -> &'a mut RObject<RType, u8> {
+    pub fn to_raw_mut<'a, 'b>(&'a mut self, pc: &Pc) -> &'b mut RObject<RType, u8> {
         if self.is_raw() {
             self.transmute_mut()
         } else {
@@ -946,7 +950,7 @@ impl<RType: RAtomic + RHasLength, RMode> RObject<RType, RMode> {
     }
 
     /// Check if appropriate to characterize storage mode as "double".
-    pub fn logical_mut(&mut self) -> Result<&mut RObject<RType, bool>, &'static str> {
+    pub fn logical_mut<'a, 'b>(&'a mut self) -> Result<&'b mut RObject<RType, bool>, &'static str> {
         if self.is_logical() {
             Ok(self.transmute_mut())
         } else {
@@ -970,7 +974,7 @@ impl<RType: RAtomic + RHasLength, RMode> RObject<RType, RMode> {
     }
 
     /// Attempts to coerce storage mode to "double".
-    pub fn to_logical_mut<'a>(&'a mut self, pc: &'a Pc) -> &'a mut RObject<RType, bool> {
+    pub fn to_logical_mut<'a, 'b>(&'a mut self, pc: &Pc) -> &'b mut RObject<RType, bool> {
         if self.is_logical() {
             self.transmute_mut()
         } else {
@@ -989,7 +993,9 @@ impl<RType: RAtomic + RHasLength, RMode> RObject<RType, RMode> {
     }
 
     /// Check if appropriate to characterize storage mode as "double".
-    pub fn character_mut(&mut self) -> Result<&mut RObject<RType, RCharacter>, &'static str> {
+    pub fn character_mut<'a, 'b>(
+        &'a mut self,
+    ) -> Result<&'b mut RObject<RType, RCharacter>, &'static str> {
         if self.is_character() {
             Ok(self.transmute_mut())
         } else {
@@ -1013,7 +1019,7 @@ impl<RType: RAtomic + RHasLength, RMode> RObject<RType, RMode> {
     }
 
     /// Attempts to coerce storage mode to "double".
-    pub fn to_character_mut<'a>(&'a mut self, pc: &'a Pc) -> &'a mut RObject<RType, RCharacter> {
+    pub fn to_character_mut<'a, 'b>(&'a mut self, pc: &Pc) -> &'b mut RObject<RType, RCharacter> {
         if self.is_character() {
             self.transmute_mut()
         } else {
@@ -1103,7 +1109,7 @@ impl<RMode> RObject<RMatrix, RMode> {
     }
 
     /// Manipulates the matrix in place to be a vector by dropping the `dim` attribute.
-    pub fn as_vector(&mut self) -> &mut RObject<RVector, RMode> {
+    pub fn as_vector<'a, 'b>(&'a mut self) -> &'b mut RObject<RVector, RMode> {
         unsafe { Rf_setAttrib(self.sexp(), R_DimSymbol, R_NilValue) };
         self.transmute_mut()
     }
@@ -1119,7 +1125,7 @@ impl<RType> RObject<RArray, RType> {
 
     // Create a new vector from a matrix.
     /// Convert an RArray to a Vector.
-    pub fn as_vector(&mut self) -> &mut RObject<RVector, RType> {
+    pub fn as_vector<'a, 'b>(&'a mut self) -> &'b mut RObject<RVector, RType> {
         unsafe { Rf_setAttrib(self.sexp(), R_DimSymbol, R_NilValue) };
         self.transmute_mut()
     }
@@ -1646,12 +1652,12 @@ impl<RMode> RObject<RList, RMode> {
     }
 
     /// Convert an RList to an RDataFrame.
-    pub fn to_data_frame<'a>(
+    pub fn to_data_frame<'a, 'b>(
         &'a mut self,
         names: &RObject<RVector, RCharacter>,
         rownames: &RObject<RVector, RCharacter>,
         pc: &Pc,
-    ) -> Result<&'a mut RObject<RList, RDataFrame>, &'static str> {
+    ) -> Result<&'b mut RObject<RList, RDataFrame>, &'static str> {
         if names.len() != self.len() {
             return Err("Length of names is not correct");
         }
