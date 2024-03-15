@@ -1664,7 +1664,7 @@ impl<RMode> RObject<RList, RMode> {
         let mut nrow = -1;
         for i in 0..self.len() {
             let x = self.get(i).unwrap();
-            if x.is_vector() {
+            if !x.is_vector() {
                 return Err("Expected an atomic vector... Have you set the list elements yet?");
             }
             let len = unsafe { Rf_xlength(x.sexp()) };
