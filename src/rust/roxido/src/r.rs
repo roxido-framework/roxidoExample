@@ -10,10 +10,13 @@
 //   https://github.com/wch/r-source
 
 use crate::rbindings::*;
+use crate::stop::UnwrapOrStop;
 
 use std::collections::HashMap;
 use std::ffi::{c_char, c_void, CStr};
 use std::marker::PhantomData;
+
+static TOO_LONG: &'static str = "Too long to be represented by R";
 
 pub struct Pc {
     counter: std::cell::RefCell<i32>,
@@ -144,7 +147,7 @@ impl Pc {
         let sexp = unsafe {
             Rf_ScalarString(Rf_mkCharLenCE(
                 x.as_ptr() as *const c_char,
-                x.len().try_into().unwrap(),
+                x.len().try_into().stop_str(TOO_LONG),
                 cetype_t_CE_UTF8,
             ))
         };
@@ -152,7 +155,8 @@ impl Pc {
     }
 
     fn new_vector<'a, RMode>(&self, code: u32, length: usize) -> &'a mut RObject<RVector, RMode> {
-        let sexp = self.protect(unsafe { Rf_allocVector(code, length.try_into().unwrap()) });
+        let sexp =
+            self.protect(unsafe { Rf_allocVector(code, length.try_into().stop_str(TOO_LONG)) });
         self.transmute_sexp_mut(sexp)
     }
 
@@ -188,7 +192,11 @@ impl Pc {
         ncol: usize,
     ) -> &'a mut RObject<RMatrix, RMode> {
         let sexp = self.protect(unsafe {
-            Rf_allocMatrix(code, nrow.try_into().unwrap(), ncol.try_into().unwrap())
+            Rf_allocMatrix(
+                code,
+                nrow.try_into().stop_str(TOO_LONG),
+                ncol.try_into().stop_str(TOO_LONG),
+            )
         });
         self.transmute_sexp_mut(sexp)
     }
@@ -224,7 +232,10 @@ impl Pc {
 
     #[allow(clippy::mut_from_ref)]
     fn new_array<T>(&self, code: u32, dim: &[usize]) -> &mut RObject<RArray, T> {
-        let d = dim.iter().map(|x| i32::try_from(*x).unwrap()).to_r(self);
+        let d = dim
+            .iter()
+            .map(|x| i32::try_from(*x).stop_str(TOO_LONG))
+            .to_r(self);
         self.transmute_sexp_mut(self.protect(unsafe { Rf_allocArray(code, d.sexp()) }))
     }
 
@@ -255,7 +266,8 @@ impl Pc {
 
     /// Create a new list.
     pub fn new_list(&self, length: usize) -> &mut RObject<RList> {
-        let sexp = self.protect(unsafe { Rf_allocVector(VECSXP, length.try_into().unwrap()) });
+        let sexp =
+            self.protect(unsafe { Rf_allocVector(VECSXP, length.try_into().stop_str(TOO_LONG)) });
         self.transmute_sexp_mut(sexp)
     }
 
@@ -278,7 +290,7 @@ impl Pc {
         let sexp = self.protect(unsafe {
             Rf_mkCharLenCE(
                 x.as_ptr() as *const c_char,
-                x.len().try_into().unwrap(),
+                x.len().try_into().stop_str(TOO_LONG),
                 cetype_t_CE_UTF8,
             )
         });
@@ -1504,21 +1516,15 @@ impl RObject<RVector, RCharacter> {
 
     /// Set the value at a certain index in a character RVector.
     pub fn set(&mut self, index: usize, value: &str) -> Result<(), &'static str> {
-        unsafe {
-            let value = Rf_mkCharLenCE(
-                value.as_ptr() as *const c_char,
-                value.len().try_into().unwrap(),
-                cetype_t_CE_UTF8,
-            );
-            self.set_engine(index, value, SET_STRING_ELT)
-        }
+        let len = value.len().try_into().map_err(|_| TOO_LONG)?;
+        let value =
+            unsafe { Rf_mkCharLenCE(value.as_ptr() as *const c_char, len, cetype_t_CE_UTF8) };
+        self.set_engine(index, value, SET_STRING_ELT)
     }
 
     /// Set the value at a certain index in a character RVector to NA.
-    pub fn set_na(&mut self, index: usize) {
-        unsafe {
-            SET_STRING_ELT(self.sexp(), index.try_into().unwrap(), R_NaString);
-        }
+    pub fn set_na(&mut self, index: usize) -> Result<(), &'static str> {
+        self.set_engine(index, unsafe { R_NaString }, SET_STRING_ELT)
     }
 }
 
@@ -2095,7 +2101,9 @@ impl<T: IntoIterator<Item = i32> + ExactSizeIterator> ToR4<RVector, i32> for T {
 
 impl<'a> ToR1<'a, RVector, i32> for usize {
     fn to_r(&self, pc: &'a Pc) -> &'a mut RObject<RVector, i32> {
-        pc.transmute_sexp_mut(pc.protect(unsafe { Rf_ScalarInteger((*self).try_into().unwrap()) }))
+        pc.transmute_sexp_mut(pc.protect(unsafe {
+            Rf_ScalarInteger((*self).try_into().stop_str("Could not fit usize into i32"))
+        }))
     }
 }
 
@@ -2110,7 +2118,7 @@ impl<'a> ToR1<'a, RVector, i32> for &[usize] {
         let result = pc.new_vector_integer(self.len());
         let slice = result.slice_mut();
         for (i, j) in slice.iter_mut().zip(self.iter()) {
-            *i = (*j).try_into().unwrap();
+            *i = (*j).try_into().stop_str("Could not fit usize into i32");
         }
         result
     }
@@ -2121,7 +2129,7 @@ impl<'a> ToR1<'a, RVector, i32> for &mut [usize] {
         let result = pc.new_vector_integer(self.len());
         let slice = result.slice_mut();
         for (i, j) in slice.iter_mut().zip(self.iter()) {
-            *i = (*j).try_into().unwrap();
+            *i = (*j).try_into().stop_str("Could not fit usize into i32");
         }
         result
     }
@@ -2286,7 +2294,7 @@ impl<'a> ToR1<'a, RVector, RCharacter> for &str {
         let sexp = unsafe {
             Rf_ScalarString(Rf_mkCharLenCE(
                 self.as_ptr() as *const c_char,
-                self.len().try_into().unwrap(),
+                self.len().try_into().stop_str(TOO_LONG),
                 cetype_t_CE_UTF8,
             ))
         };
