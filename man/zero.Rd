@@ -4,14 +4,15 @@
 \alias{zero}
 \title{Zero-Finding}
 \usage{
-zero(f, guesses, tol = 1e-07)
+zero(f, guess1, guess2, tol = 1e-07)
 }
 \arguments{
 \item{f}{A function taking a numeric vector of length one.}
 
-\item{guesses}{A numerical vector of length two giving two guesses for the
-zero of the function.  The sign of the function evaluated at these two
-guesses must be opposite.}
+\item{guess1}{A guess for the zero of the function.}
+
+\item{guess2}{Another guess for the zero of the function. The sign of the function
+evaluated at the two guesses must be opposite.}
 
 \item{tol}{Tolerance controlling the desired precision.}
 }
@@ -21,5 +22,5 @@ algorithm shown in Section 5.11.1 "Zero-finding" of \href{https://cran.r-project
 }
 \examples{
 cube1 <- function(x) (x^2 + 1) * (x - 1.5)
-zero(cube1, c(-2, 11.5))
+zero(cube1, -2, 11.5)
 }
