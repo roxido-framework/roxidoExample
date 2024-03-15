@@ -5,7 +5,7 @@ mod registration {
 use roxido::*;
 
 #[roxido]
-fn convolve2(a: &RObject<RVector, RAtomic>, b: &RObject<RVector, RAtomic>) {
+fn convolve2(a: &RObject<RVector>, b: &RObject<RVector>) {
     let r = pc.new_vector_double(a.len() + b.len() - 1);
     let ab = r.slice_mut();
     for abi in ab.iter_mut() {
