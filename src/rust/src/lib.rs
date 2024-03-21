@@ -42,11 +42,11 @@ fn zero(f: &RObject<RFunction>, guess1: f64, guess2: f64, tol: f64) {
     let (mut x0, mut x1) = (guess1, guess2);
     let mut f0 = g(x0);
     if f0 == 0.0 {
-        return x0.to_r(pc);
+        return x0;
     }
     let f1 = g(x1);
     if f1 == 0.0 {
-        return x1.to_r(pc);
+        return x1;
     }
     if f0 * f1 > 0.0 {
         stop!("Oops, guesses1 and guesses2 have the same sign.");
@@ -54,11 +54,11 @@ fn zero(f: &RObject<RFunction>, guess1: f64, guess2: f64, tol: f64) {
     loop {
         let xc = 0.5 * (x0 + x1);
         if (x0 - x1).abs() < tol {
-            return xc.to_r(pc);
+            return xc;
         }
         let fc = g(xc);
         if fc == 0.0 {
-            return xc.to_r(pc);
+            return xc;
         }
         if f0 * fc > 0.0 {
             x0 = xc;
