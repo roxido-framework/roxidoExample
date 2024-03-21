@@ -329,7 +329,7 @@ impl Pc {
     /// Thus the programmer is then responsible to release the memory by calling [`RObject::decode_val`].
     ///
     #[allow(clippy::mut_from_ref)]
-    pub fn encode<T, RType, RMode>(
+    pub fn encode_full<T, RType, RMode>(
         &self,
         x: T,
         tag: &RObject<RType, RMode>,
@@ -356,6 +356,16 @@ impl Pc {
             }
             self.transmute_sexp_mut(sexp)
         }
+    }
+
+    /// Move Rust object to an R external pointer.
+    ///
+    /// This *method* moves a Rust object to an R external pointer and then, as far as Rust is concerned, leaks the memory.
+    /// Thus the programmer is then responsible to release the memory by calling [`RObject::decode_val`].
+    ///
+    #[allow(clippy::mut_from_ref)]
+    pub fn encode<T>(&self, x: T, tag: &str) -> &mut RObject<RExternalPtr> {
+        self.encode_full(x, tag.to_r(self), true)
     }
 
     /// Returns an R NULL value.

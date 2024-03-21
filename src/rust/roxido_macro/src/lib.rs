@@ -381,14 +381,10 @@ fn roxido_fn(options: Vec<NestedMeta>, item_fn: syn::ItemFn) -> TokenStream {
     // Check that return is of type '&RObject'.
     match &output {
         syn::ReturnType::Default => {}
-        syn::ReturnType::Type(_, tipe) => {
-            let tipe_as_string = quote!(#tipe).to_string();
-            if tipe_as_string != "& RObject" && tipe_as_string != "SEXP" {
-                panic!(
-                    "A function with the 'roxido' attribute always implicitly returns an '&RObject' or 'SEXP', but found '{}'",
-                    tipe_as_string
-                );
-            }
+        _ => {
+            panic!(
+                "A 'roxido' function should not have an explicit return type and it implicitly returns any value whose type implements one of the ToR1, ToR2, etc. traits"
+            );
         }
     }
     let func_name = quote!(#name).to_string();
