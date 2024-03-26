@@ -137,17 +137,17 @@ impl R {
     }
 
     /// Returns an R NA value for storage mode "double".
-    pub fn na_double() -> f64 {
+    pub fn na_f64() -> f64 {
         unsafe { R_NaReal }
     }
 
     /// Returns an R NA value for storage mode "integer".
-    pub fn na_integer() -> i32 {
+    pub fn na_i32() -> i32 {
         unsafe { R_NaInt }
     }
 
     /// Returns an R NA value for storage mode "logical".
-    pub fn na_logical() -> i32 {
+    pub fn na_bool() -> i32 {
         unsafe { R_NaInt }
     }
 
@@ -167,17 +167,17 @@ impl R {
     }
 
     /// Checks if an f64 can be interpreted as an R NA value.
-    pub fn is_na_double(x: f64) -> bool {
+    pub fn is_na_f64(x: f64) -> bool {
         unsafe { R_IsNA(x) != 0 }
     }
 
     /// Checks if an i32 can be interpreted as an R NA value.
-    pub fn is_na_integer(x: i32) -> bool {
+    pub fn is_na_i32(x: i32) -> bool {
         x == unsafe { R_NaInt }
     }
 
     /// Checks if a bool can be interpreted as an R NA value.
-    pub fn is_na_logical(x: i32) -> bool {
+    pub fn is_na_bool(x: i32) -> bool {
         x == unsafe { R_NaInt }
     }
 
@@ -453,12 +453,12 @@ impl<RType, RMode> RObject<RType, RMode> {
         if self.is_vector() {
             let s: &RObject<RVector> = self.transmute();
             if s.is_scalar() {
-                if s.is_double() {
+                if s.is_f64() {
                     unsafe { R_IsNA(Rf_asReal(s.sexp())) != 0 }
-                } else if s.is_integer() {
-                    unsafe { Rf_asInteger(s.sexp()) == R::na_integer() }
-                } else if s.is_logical() {
-                    unsafe { Rf_asLogical(s.sexp()) == R::na_logical() }
+                } else if s.is_i32() {
+                    unsafe { Rf_asInteger(s.sexp()) == R::na_i32() }
+                } else if s.is_bool() {
+                    unsafe { Rf_asLogical(s.sexp()) == R::na_bool() }
                 } else if s.is_character() {
                     unsafe { Rf_asChar(s.sexp()) == R_NaString }
                 } else {
@@ -476,7 +476,7 @@ impl<RType, RMode> RObject<RType, RMode> {
     pub fn is_nan(&self) -> bool {
         if self.is_vector() {
             let s: &RObject<RVector> = self.transmute();
-            if s.is_scalar() && s.is_double() {
+            if s.is_scalar() && s.is_f64() {
                 unsafe { R_IsNaN(Rf_asReal(s.sexp())) != 0 }
             } else {
                 false
@@ -633,8 +633,8 @@ impl<RType: RAtomic + RHasLength, RMode> RObject<RType, RMode> {
     }
 
     /// Check if appropriate to characterize storage mode as "double".
-    pub fn double(&self) -> Result<&RObject<RType, f64>, &'static str> {
-        if self.is_double() {
+    pub fn f64(&self) -> Result<&RObject<RType, f64>, &'static str> {
+        if self.is_f64() {
             Ok(self.transmute())
         } else {
             Err("Not of storage mode 'double'")
@@ -642,8 +642,8 @@ impl<RType: RAtomic + RHasLength, RMode> RObject<RType, RMode> {
     }
 
     /// Check if appropriate to characterize storage mode as "double".
-    pub fn double_mut(&mut self) -> Result<&mut RObject<RType, f64>, &'static str> {
-        if self.is_double() {
+    pub fn f64_mut(&mut self) -> Result<&mut RObject<RType, f64>, &'static str> {
+        if self.is_f64() {
             Ok(self.transmute_mut())
         } else {
             Err("Not of storage mode 'double'")
@@ -651,13 +651,13 @@ impl<RType: RAtomic + RHasLength, RMode> RObject<RType, RMode> {
     }
 
     /// Checks to see if the data can be interpreted as R double.
-    pub fn is_double(&self) -> bool {
+    pub fn is_f64(&self) -> bool {
         unsafe { Rf_isReal(self.sexp()) != 0 }
     }
 
     /// Attempts to coerce storage mode to "double".
-    pub fn to_double<'a>(&'a self, pc: &'a Pc) -> &'a RObject<RType, f64> {
-        if self.is_double() {
+    pub fn to_f64<'a>(&'a self, pc: &'a Pc) -> &'a RObject<RType, f64> {
+        if self.is_f64() {
             self.transmute()
         } else {
             let sexp = pc.protect(unsafe { Rf_coerceVector(self.sexp(), REALSXP) });
@@ -666,8 +666,8 @@ impl<RType: RAtomic + RHasLength, RMode> RObject<RType, RMode> {
     }
 
     /// Attempts to coerce storage mode to "double".
-    pub fn to_double_mut(&mut self, pc: &Pc) -> &mut RObject<RType, f64> {
-        if self.is_double() {
+    pub fn to_f64_mut(&mut self, pc: &Pc) -> &mut RObject<RType, f64> {
+        if self.is_f64() {
             self.transmute_mut()
         } else {
             let sexp = pc.protect(unsafe { Rf_coerceVector(self.sexp(), REALSXP) });
@@ -676,8 +676,8 @@ impl<RType: RAtomic + RHasLength, RMode> RObject<RType, RMode> {
     }
 
     /// Check if appropriate to characterize storage mode as "double".
-    pub fn integer(&self) -> Result<&RObject<RType, i32>, &'static str> {
-        if self.is_integer() {
+    pub fn i32(&self) -> Result<&RObject<RType, i32>, &'static str> {
+        if self.is_i32() {
             Ok(self.transmute())
         } else {
             Err("Not of storage mode 'integer'")
@@ -685,8 +685,8 @@ impl<RType: RAtomic + RHasLength, RMode> RObject<RType, RMode> {
     }
 
     /// Check if appropriate to characterize storage mode as "double".
-    pub fn integer_mut(&mut self) -> Result<&mut RObject<RType, i32>, &'static str> {
-        if self.is_integer() {
+    pub fn i32_mut(&mut self) -> Result<&mut RObject<RType, i32>, &'static str> {
+        if self.is_i32() {
             Ok(self.transmute_mut())
         } else {
             Err("Not of storage mode 'integer'")
@@ -694,13 +694,13 @@ impl<RType: RAtomic + RHasLength, RMode> RObject<RType, RMode> {
     }
 
     /// Checks to see if the data can be interpreted as R double.
-    pub fn is_integer(&self) -> bool {
+    pub fn is_i32(&self) -> bool {
         unsafe { Rf_isInteger(self.sexp()) != 0 }
     }
 
     /// Attempts to coerce storage mode to "double".
-    pub fn to_integer<'a>(&'a self, pc: &'a Pc) -> &'a RObject<RType, i32> {
-        if self.is_integer() {
+    pub fn to_i32<'a>(&'a self, pc: &'a Pc) -> &'a RObject<RType, i32> {
+        if self.is_i32() {
             self.transmute()
         } else {
             let sexp = pc.protect(unsafe { Rf_coerceVector(self.sexp(), INTSXP) });
@@ -709,8 +709,8 @@ impl<RType: RAtomic + RHasLength, RMode> RObject<RType, RMode> {
     }
 
     /// Attempts to coerce storage mode to "double".
-    pub fn to_integer_mut(&mut self, pc: &Pc) -> &mut RObject<RType, i32> {
-        if self.is_integer() {
+    pub fn to_i32_mut(&mut self, pc: &Pc) -> &mut RObject<RType, i32> {
+        if self.is_i32() {
             self.transmute_mut()
         } else {
             let sexp = pc.protect(unsafe { Rf_coerceVector(self.sexp(), INTSXP) });
@@ -719,8 +719,8 @@ impl<RType: RAtomic + RHasLength, RMode> RObject<RType, RMode> {
     }
 
     /// Check if appropriate to characterize storage mode as "double".
-    pub fn raw(&self) -> Result<&RObject<RType, u8>, &'static str> {
-        if self.is_raw() {
+    pub fn u8(&self) -> Result<&RObject<RType, u8>, &'static str> {
+        if self.is_u8() {
             Ok(self.transmute())
         } else {
             Err("Not of storage mode 'raw'")
@@ -728,8 +728,8 @@ impl<RType: RAtomic + RHasLength, RMode> RObject<RType, RMode> {
     }
 
     /// Check if appropriate to characterize storage mode as "double".
-    pub fn raw_mut(&mut self) -> Result<&mut RObject<RType, u8>, &'static str> {
-        if self.is_raw() {
+    pub fn u8_mut(&mut self) -> Result<&mut RObject<RType, u8>, &'static str> {
+        if self.is_u8() {
             Ok(self.transmute_mut())
         } else {
             Err("Not of storage mode 'raw'")
@@ -737,13 +737,13 @@ impl<RType: RAtomic + RHasLength, RMode> RObject<RType, RMode> {
     }
 
     /// Checks to see if the data can be interpreted as R double.
-    pub fn is_raw(&self) -> bool {
+    pub fn is_u8(&self) -> bool {
         unsafe { TYPEOF(self.sexp()) == RAWSXP as i32 }
     }
 
     /// Attempts to coerce storage mode to "double".
-    pub fn to_raw<'a>(&'a self, pc: &'a Pc) -> &'a RObject<RType, u8> {
-        if self.is_raw() {
+    pub fn to_u8<'a>(&'a self, pc: &'a Pc) -> &'a RObject<RType, u8> {
+        if self.is_u8() {
             self.transmute()
         } else {
             let sexp = pc.protect(unsafe { Rf_coerceVector(self.sexp(), RAWSXP) });
@@ -752,8 +752,8 @@ impl<RType: RAtomic + RHasLength, RMode> RObject<RType, RMode> {
     }
 
     /// Attempts to coerce storage mode to "double".
-    pub fn to_raw_mut(&mut self, pc: &Pc) -> &mut RObject<RType, u8> {
-        if self.is_raw() {
+    pub fn to_u8_mut(&mut self, pc: &Pc) -> &mut RObject<RType, u8> {
+        if self.is_u8() {
             self.transmute_mut()
         } else {
             let sexp = pc.protect(unsafe { Rf_coerceVector(self.sexp(), RAWSXP) });
@@ -762,8 +762,8 @@ impl<RType: RAtomic + RHasLength, RMode> RObject<RType, RMode> {
     }
 
     /// Check if appropriate to characterize storage mode as "double".
-    pub fn logical(&self) -> Result<&RObject<RType, bool>, &'static str> {
-        if self.is_logical() {
+    pub fn bool(&self) -> Result<&RObject<RType, bool>, &'static str> {
+        if self.is_bool() {
             Ok(self.transmute())
         } else {
             Err("Not of storage mode 'logical'")
@@ -771,8 +771,8 @@ impl<RType: RAtomic + RHasLength, RMode> RObject<RType, RMode> {
     }
 
     /// Check if appropriate to characterize storage mode as "double".
-    pub fn logical_mut(&mut self) -> Result<&mut RObject<RType, bool>, &'static str> {
-        if self.is_logical() {
+    pub fn bool_mut(&mut self) -> Result<&mut RObject<RType, bool>, &'static str> {
+        if self.is_bool() {
             Ok(self.transmute_mut())
         } else {
             Err("Not of storage mode 'logical'")
@@ -780,13 +780,13 @@ impl<RType: RAtomic + RHasLength, RMode> RObject<RType, RMode> {
     }
 
     /// Checks to see if the data can be interpreted as R double.
-    pub fn is_logical(&self) -> bool {
+    pub fn is_bool(&self) -> bool {
         unsafe { Rf_isLogical(self.sexp()) != 0 }
     }
 
     /// Attempts to coerce storage mode to "double".
-    pub fn to_logical<'a>(&'a self, pc: &'a Pc) -> &'a RObject<RType, bool> {
-        if self.is_logical() {
+    pub fn to_bool<'a>(&'a self, pc: &'a Pc) -> &'a RObject<RType, bool> {
+        if self.is_bool() {
             self.transmute()
         } else {
             let sexp = pc.protect(unsafe { Rf_coerceVector(self.sexp(), LGLSXP) });
@@ -795,8 +795,8 @@ impl<RType: RAtomic + RHasLength, RMode> RObject<RType, RMode> {
     }
 
     /// Attempts to coerce storage mode to "double".
-    pub fn to_logical_mut(&mut self, pc: &Pc) -> &mut RObject<RType, bool> {
-        if self.is_logical() {
+    pub fn to_bool_mut(&mut self, pc: &Pc) -> &mut RObject<RType, bool> {
+        if self.is_bool() {
             self.transmute_mut()
         } else {
             let sexp = pc.protect(unsafe { Rf_coerceVector(self.sexp(), LGLSXP) });
@@ -1015,20 +1015,20 @@ impl RObject<RFunction> {
 
 impl<RMode> RObject<RScalar, RMode> {
     /// Check if appropriate to characterize as an f64.
-    pub fn f64(&self) -> f64 {
+    pub fn as_f64(&self) -> f64 {
         unsafe { Rf_asReal(self.sexp()) }
     }
 
     /// Check if appropriate to characterize as an i32.
-    pub fn i32(&self) -> Result<i32, &'static str> {
-        if self.is_integer() {
+    pub fn as_i32(&self) -> Result<i32, &'static str> {
+        if self.is_i32() {
             let x = unsafe { Rf_asInteger(self.sexp()) };
             if x == i32::MIN {
                 Err("i32 equals R's NA for integers")
             } else {
                 Ok(x)
             }
-        } else if self.is_double() {
+        } else if self.is_f64() {
             let y = unsafe { Rf_asReal(self.sexp()) };
             if y > f64::from(i32::MAX) {
                 Err("Greater than maximum integer value")
@@ -1041,9 +1041,9 @@ impl<RMode> RObject<RScalar, RMode> {
             } else {
                 Ok(y.round() as i32)
             }
-        } else if self.is_raw() {
+        } else if self.is_u8() {
             Ok(unsafe { Rf_asInteger(self.sexp()) })
-        } else if self.is_logical() {
+        } else if self.is_bool() {
             let y = unsafe { Rf_asLogical(self.sexp()) };
             if y == i32::MIN {
                 Err("Equals R's NA for logical")
@@ -1056,8 +1056,8 @@ impl<RMode> RObject<RScalar, RMode> {
     }
 
     /// Check if appropriate to characterize as a usize.
-    pub fn usize(&self) -> Result<usize, &'static str> {
-        if self.is_integer() {
+    pub fn as_usize(&self) -> Result<usize, &'static str> {
+        if self.is_i32() {
             let x = unsafe { Rf_asInteger(self.sexp()) };
             if x == i32::MIN {
                 Err("Equals R's NA for integers")
@@ -1066,7 +1066,7 @@ impl<RMode> RObject<RScalar, RMode> {
             } else {
                 usize::try_from(x).map_err(|_| "Cannot convert to usize")
             }
-        } else if self.is_double() {
+        } else if self.is_f64() {
             let y = unsafe { Rf_asReal(self.sexp()) };
             if y < 0.0 {
                 Err("Negative value not expected")
@@ -1078,10 +1078,10 @@ impl<RMode> RObject<RScalar, RMode> {
                     Err("Cannot convert to usize")
                 }
             }
-        } else if self.is_raw() {
+        } else if self.is_u8() {
             let x = unsafe { Rf_asInteger(self.sexp()) };
             usize::try_from(x).map_err(|_| "Cannot convert to usize")
-        } else if self.is_logical() {
+        } else if self.is_bool() {
             let x = unsafe { Rf_asLogical(self.sexp()) };
             if x == i32::MIN {
                 Err("Equals R's NA for logical")
@@ -1094,11 +1094,11 @@ impl<RMode> RObject<RScalar, RMode> {
     }
 
     /// Check if appropriate to characterize as a u8.
-    pub fn u8(&self) -> Result<u8, &'static str> {
-        if self.is_integer() {
+    pub fn as_u8(&self) -> Result<u8, &'static str> {
+        if self.is_i32() {
             let x = unsafe { Rf_asInteger(self.sexp()) };
             u8::try_from(x).map_err(|_| "Cannot convert to u8")
-        } else if self.is_double() {
+        } else if self.is_f64() {
             let y = unsafe { Rf_asReal(self.sexp()) };
             if y < 0.0 {
                 Err("Negative value not expected")
@@ -1110,10 +1110,10 @@ impl<RMode> RObject<RScalar, RMode> {
                     Err("Cannot convert to u8")
                 }
             }
-        } else if self.is_raw() {
+        } else if self.is_u8() {
             let x = unsafe { Rf_asInteger(self.sexp()) };
             u8::try_from(x).map_err(|_| "Cannot convert to u8")
-        } else if self.is_logical() {
+        } else if self.is_bool() {
             let x = unsafe { Rf_asLogical(self.sexp()) };
             if x == i32::MIN {
                 Err("Equals R's NA for logical")
@@ -1126,26 +1126,26 @@ impl<RMode> RObject<RScalar, RMode> {
     }
 
     /// Check if appropriate to characterize as a bool.
-    pub fn bool(&self) -> Result<bool, &'static str> {
-        if self.is_integer() {
+    pub fn as_bool(&self) -> Result<bool, &'static str> {
+        if self.is_i32() {
             let x = unsafe { Rf_asInteger(self.sexp()) };
             if x == i32::MIN {
                 Err("Equals R's NA for integers")
             } else {
                 Ok(x != 0)
             }
-        } else if self.is_double() {
+        } else if self.is_f64() {
             let y = unsafe { Rf_asReal(self.sexp()) };
-            if R::is_na_double(y) {
+            if R::is_na_f64(y) {
                 Err("Equals R's NA for doubles")
             } else if R::is_nan(y) {
                 Err("Equals R's NaN")
             } else {
                 Ok(y != 0.0)
             }
-        } else if self.is_raw() {
+        } else if self.is_u8() {
             Ok(unsafe { Rf_asInteger(self.sexp()) } != 0)
-        } else if self.is_logical() {
+        } else if self.is_bool() {
             let y = unsafe { Rf_asLogical(self.sexp()) };
             if y == i32::MIN {
                 Err("Equals R's NA for logical")
@@ -1158,9 +1158,9 @@ impl<RMode> RObject<RScalar, RMode> {
     }
 
     /// Check if appropriate to characterize as a str reference.
-    pub fn to_str<'a>(&self, pc: &'a Pc) -> Result<&'a str, &'static str> {
+    pub fn as_str<'a>(&self, pc: &'a Pc) -> &'a str {
         let s: &RObject<RVector, RCharacter> = self.to_character(pc).transmute();
-        s.get(0)
+        s.get(0).unwrap()
     }
 
     /// Manipulates the matrix in place to be a vector by dropping the `dim` attribute.

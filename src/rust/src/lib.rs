@@ -8,8 +8,8 @@ use roxido::*;
 fn convolve2(a: &RObject<RVector>, b: &RObject<RVector>) {
     let vec = RObject::<RVector, f64>::from_value(0.0, a.len() + b.len() - 1, pc);
     let ab = vec.slice_mut();
-    for (i, ai) in a.to_double(pc).slice().iter().enumerate() {
-        for (j, bj) in b.to_double(pc).slice().iter().enumerate() {
+    for (i, ai) in a.to_f64(pc).slice().iter().enumerate() {
+        for (j, bj) in b.to_f64(pc).slice().iter().enumerate() {
             ab[i + j] += ai * bj;
         }
     }
@@ -30,7 +30,7 @@ fn zero(f: &RObject<RFunction>, guess1: f64, guess2: f64, tol: f64) {
         let fx = fx
             .scalar()
             .stop_str("Unexpected return value from function.")
-            .f64();
+            .as_f64();
         if !fx.is_finite() {
             stop!("Non-finite return value from function.");
         }

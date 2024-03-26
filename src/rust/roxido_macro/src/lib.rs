@@ -139,19 +139,19 @@ fn roxido_fn(options: Vec<NestedMeta>, item_fn: syn::ItemFn) -> TokenStream {
                         match path.as_ref() {
                             "SEXP" => {}
                             "f64" => {
-                                generated_statements.push(parse_quote! { let #name = pc.transmute_sexp::<RAnyType, RUnknown>(#name).scalar().stop_str(concat!("'", stringify!(#name),"' is expected to be a scalar")).f64(); });
+                                generated_statements.push(parse_quote! { let #name = pc.transmute_sexp::<RAnyType, RUnknown>(#name).scalar().stop_str(concat!("'", stringify!(#name),"' is expected to be a scalar")).as_f64(); });
                             }
                             "i32" => {
-                                generated_statements.push(parse_quote! { let #name = pc.transmute_sexp::<RAnyType, RUnknown>(#name).scalar().stop_str(concat!("'", stringify!(#name),"' is expected to be a scalar")).i32().map_err(|x| format!(concat!("'", stringify!(#name), "' cannot be an integer: {}"), x)).stop(); });
+                                generated_statements.push(parse_quote! { let #name = pc.transmute_sexp::<RAnyType, RUnknown>(#name).scalar().stop_str(concat!("'", stringify!(#name),"' is expected to be a scalar")).as_i32().map_err(|x| format!(concat!("'", stringify!(#name), "' cannot be an integer: {}"), x)).stop(); });
                             }
                             "usize" => {
-                                generated_statements.push(parse_quote! { let #name = pc.transmute_sexp::<RAnyType, RUnknown>(#name).scalar().stop_str(concat!("'", stringify!(#name),"' is expected to be a scalar")).usize().map_err(|x| format!(concat!("'", stringify!(#name), "' cannot be a usize: {}"), x)).stop(); });
+                                generated_statements.push(parse_quote! { let #name = pc.transmute_sexp::<RAnyType, RUnknown>(#name).scalar().stop_str(concat!("'", stringify!(#name),"' is expected to be a scalar")).as_usize().map_err(|x| format!(concat!("'", stringify!(#name), "' cannot be a usize: {}"), x)).stop(); });
                             }
                             "u8" => {
-                                generated_statements.push(parse_quote! { let #name = pc.transmute_sexp::<RAnyType, RUnknown>(#name).scalar().stop_str(concat!("'", stringify!(#name),"' is expected to be a scalar")).u8().map_err(|x| format!(concat!("'", stringify!(#name), "' cannot be a raw: {}"), x)).stop(); });
+                                generated_statements.push(parse_quote! { let #name = pc.transmute_sexp::<RAnyType, RUnknown>(#name).scalar().stop_str(concat!("'", stringify!(#name),"' is expected to be a scalar")).as_u8().map_err(|x| format!(concat!("'", stringify!(#name), "' cannot be a raw: {}"), x)).stop(); });
                             }
                             "bool" => {
-                                generated_statements.push(parse_quote! { let #name = pc.transmute_sexp::<RAnyType, RUnknown>(#name).scalar().stop_str(concat!("'", stringify!(#name),"' is expected to be a scalar")).bool().map_err(|x| format!(concat!("'", stringify!(#name), "' cannot be a logical: {}"), x)).stop(); });
+                                generated_statements.push(parse_quote! { let #name = pc.transmute_sexp::<RAnyType, RUnknown>(#name).scalar().stop_str(concat!("'", stringify!(#name),"' is expected to be a scalar")).as_bool().map_err(|x| format!(concat!("'", stringify!(#name), "' cannot be a logical: {}"), x)).stop(); });
                             }
                             _ => {
                                 error_msg();
@@ -165,7 +165,7 @@ fn roxido_fn(options: Vec<NestedMeta>, item_fn: syn::ItemFn) -> TokenStream {
                                 let path = quote!(#ty).to_string();
                                 if !path.starts_with("RObject") {
                                     if path == "str" {
-                                        generated_statements.push(parse_quote! { let #name = pc.transmute_sexp::<RAnyType, RUnknown>(#name).scalar().stop_str(concat!("'", stringify!(#name),"' is expected to be a scalar")).to_str(pc).map_err(|x| format!(concat!("'", stringify!(#name), "' cannot be a string: {}"), x)).stop(); });
+                                        generated_statements.push(parse_quote! { let #name = pc.transmute_sexp::<RAnyType, RUnknown>(#name).scalar().stop_str(concat!("'", stringify!(#name),"' is expected to be a scalar")).as_str(pc).map_err(|x| format!(concat!("'", stringify!(#name), "' cannot be a string: {}"), x)).stop(); });
                                     } else {
                                         error_msg();
                                     }
@@ -297,44 +297,44 @@ fn roxido_fn(options: Vec<NestedMeta>, item_fn: syn::ItemFn) -> TokenStream {
                                                 "f64" => {
                                                     if mutable {
                                                         generated_statements.push(parse_quote! {
-                                                            let #name = #name.double_mut().stop_str(concat!("'", stringify!(#name),"' is expected to have storage mode double"));
+                                                            let #name = #name.f64_mut().stop_str(concat!("'", stringify!(#name),"' is expected to have storage mode double"));
                                                         });
                                                     } else {
                                                         generated_statements.push(parse_quote! {
-                                                            let #name = #name.double().stop_str(concat!("'", stringify!(#name),"' is expected to have storage mode double"));
+                                                            let #name = #name.f64().stop_str(concat!("'", stringify!(#name),"' is expected to have storage mode double"));
                                                         });
                                                     }
                                                 }
                                                 "i32" => {
                                                     if mutable {
                                                         generated_statements.push(parse_quote! {
-                                                            let #name = #name.integer_mut().stop_str(concat!("'", stringify!(#name),"' is expected to have storage mode integer"));
+                                                            let #name = #name.i32_mut().stop_str(concat!("'", stringify!(#name),"' is expected to have storage mode integer"));
                                                         });
                                                     } else {
                                                         generated_statements.push(parse_quote! {
-                                                            let #name = #name.integer().stop_str(concat!("'", stringify!(#name),"' is expected to have storage mode integer"));
+                                                            let #name = #name.i32().stop_str(concat!("'", stringify!(#name),"' is expected to have storage mode integer"));
                                                         });
                                                     }
                                                 }
                                                 "u8" => {
                                                     if mutable {
                                                         generated_statements.push(parse_quote! {
-                                                            let #name = #name.raw_mut().stop_str(concat!("'", stringify!(#name),"' is expected to have storage mode raw"));
+                                                            let #name = #name.u8_mut().stop_str(concat!("'", stringify!(#name),"' is expected to have storage mode raw"));
                                                         });
                                                     } else {
                                                         generated_statements.push(parse_quote! {
-                                                            let #name = #name.raw().stop_str(concat!("'", stringify!(#name),"' is expected to have storage mode raw"));
+                                                            let #name = #name.u8().stop_str(concat!("'", stringify!(#name),"' is expected to have storage mode raw"));
                                                         });
                                                     }
                                                 }
                                                 "bool" => {
                                                     if mutable {
                                                         generated_statements.push(parse_quote! {
-                                                            let #name = #name.logical_mut().stop_str(concat!("'", stringify!(#name),"' is expected to have storage mode logical"));
+                                                            let #name = #name.bool_mut().stop_str(concat!("'", stringify!(#name),"' is expected to have storage mode logical"));
                                                         });
                                                     } else {
                                                         generated_statements.push(parse_quote! {
-                                                            let #name = #name.logical().stop_str(concat!("'", stringify!(#name),"' is expected to have storage mode logical"));
+                                                            let #name = #name.bool().stop_str(concat!("'", stringify!(#name),"' is expected to have storage mode logical"));
                                                         });
                                                     }
                                                 }
