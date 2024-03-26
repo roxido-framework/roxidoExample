@@ -18,23 +18,16 @@ use std::marker::PhantomData;
 
 static TOO_LONG: &str = "Too long to be represented by R";
 
+pub struct R;
+
+#[repr(C)]
+pub struct RObject<RType = RAnyType, RMode = RUnknown> {
+    pub sexprec: SEXPREC,
+    rtype: PhantomData<(RType, RMode)>,
+}
+
 pub struct Pc {
     counter: std::cell::RefCell<i32>,
-}
-
-impl Default for Pc {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl Drop for Pc {
-    fn drop(&mut self) {
-        let count = self.counter.borrow();
-        if *self.counter.borrow() > 0 {
-            unsafe { Rf_unprotect(*count) };
-        }
-    }
 }
 
 pub struct RAnyType;
@@ -61,6 +54,8 @@ pub struct RExternalPtr;
 
 pub struct RSymbol;
 
+pub struct RError;
+
 pub trait RHasLength {}
 impl RHasLength for RScalar {}
 impl RHasLength for RVector {}
@@ -78,6 +73,21 @@ pub trait ROneDimensional {}
 impl ROneDimensional for RVector {}
 impl ROneDimensional for RList {}
 
+impl Default for Pc {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl Drop for Pc {
+    fn drop(&mut self) {
+        let count = self.counter.borrow();
+        if *self.counter.borrow() > 0 {
+            unsafe { Rf_unprotect(*count) };
+        }
+    }
+}
+
 impl Pc {
     /// Allocate a new protection counter.
     ///
@@ -89,17 +99,21 @@ impl Pc {
     }
 
     #[allow(clippy::not_unsafe_ptr_arg_deref)]
-    fn protect(&self, sexp: SEXP) -> SEXP {
+    pub fn protect(&self, sexp: SEXP) -> SEXP {
         unsafe { Rf_protect(sexp) };
         let mut counter = self.counter.borrow_mut();
         *counter += 1;
         sexp
     }
 
+    /// This is an implementation detail and *should not* be called directly!
+    #[doc(hidden)]
     pub fn transmute_sexp<RTypeTo, RModeTo>(&self, sexp: SEXP) -> &RObject<RTypeTo, RModeTo> {
         unsafe { &*sexp.cast::<RObject<RTypeTo, RModeTo>>() }
     }
 
+    /// This is an implementation detail and *should not* be called directly!
+    #[doc(hidden)]
     pub fn transmute_sexp_mut<'a, RTypeTo, RModeTo>(
         &self,
         sexp: SEXP,
@@ -107,230 +121,19 @@ impl Pc {
         unsafe { &mut *sexp.cast::<RObject<RTypeTo, RModeTo>>() }
     }
 
+    /// This is an implementation detail and *should not* be called directly!
+    #[doc(hidden)]
     pub fn transmute_sexp_static<RTypeTo, RModeTo>(
         sexp: SEXP,
     ) -> &'static RObject<RTypeTo, RModeTo> {
         unsafe { &*sexp.cast::<RObject<RTypeTo, RModeTo>>() }
     }
+}
 
-    /// Create a new scalar (i.e., a vector of length 1) of storage mode "integer".
-    #[allow(clippy::mut_from_ref)]
-    pub fn new_scalar_integer(&self, x: i32) -> &mut RObject<RScalar, i32> {
-        let sexp = self.protect(unsafe { Rf_ScalarInteger(x) });
-        self.transmute_sexp_mut(sexp)
-    }
-
-    /// Create a new scalar (i.e., a vector of length 1) of storage mode "raw".
-    #[allow(clippy::mut_from_ref)]
-    pub fn new_scalar_raw(&self, x: u8) -> &mut RObject<RScalar, u8> {
-        let sexp = self.protect(unsafe { Rf_ScalarRaw(x) });
-        self.transmute_sexp_mut(sexp)
-    }
-
-    /// Create a new scalar (i.e., a vector of length 1) of storage mode "logical".
-    #[allow(clippy::mut_from_ref)]
-    pub fn new_scalar_logical(&self, x: bool) -> &mut RObject<RScalar, bool> {
-        let sexp = self.protect(unsafe { Rf_ScalarLogical(if x { 1 } else { 0 }) });
-        self.transmute_sexp_mut(sexp)
-    }
-
-    /// Create a new scalar (i.e., a vector of length 1) of storage mode "character".
-    #[allow(clippy::mut_from_ref)]
-    pub fn new_scalar_character(&self, x: &str) -> &mut RObject<RScalar, RCharacter> {
-        let sexp = unsafe {
-            Rf_ScalarString(Rf_mkCharLenCE(
-                x.as_ptr() as *const c_char,
-                x.len().try_into().stop_str(TOO_LONG),
-                cetype_t_CE_UTF8,
-            ))
-        };
-        self.transmute_sexp_mut(self.protect(sexp))
-    }
-
-    fn new_matrix<'a, RMode>(
-        &self,
-        code: u32,
-        nrow: usize,
-        ncol: usize,
-    ) -> &'a mut RObject<RMatrix, RMode> {
-        let sexp = self.protect(unsafe {
-            Rf_allocMatrix(
-                code,
-                nrow.try_into().stop_str(TOO_LONG),
-                ncol.try_into().stop_str(TOO_LONG),
-            )
-        });
-        self.transmute_sexp_mut(sexp)
-    }
-
-    /// Create a new matrix of storage mode "double".
-    pub fn new_matrix_double(&self, nrow: usize, ncol: usize) -> &mut RObject<RMatrix, f64> {
-        self.new_matrix(REALSXP, nrow, ncol)
-    }
-
-    /// Create a new matrix of storage mode "integer".
-    pub fn new_matrix_integer(&self, nrow: usize, ncol: usize) -> &mut RObject<RMatrix, i32> {
-        self.new_matrix(INTSXP, nrow, ncol)
-    }
-
-    /// Create a new matrix of storage mode "raw".
-    pub fn new_matrix_raw(&self, nrow: usize, ncol: usize) -> &mut RObject<RMatrix, u8> {
-        self.new_matrix(RAWSXP, nrow, ncol)
-    }
-
-    /// Create a new matrix of storage mode "logical".
-    pub fn new_matrix_logical(&self, nrow: usize, ncol: usize) -> &mut RObject<RMatrix, bool> {
-        self.new_matrix(LGLSXP, nrow, ncol)
-    }
-
-    /// Create a new matrix of storage mode "character".
-    pub fn new_matrix_character(
-        &self,
-        nrow: usize,
-        ncol: usize,
-    ) -> &mut RObject<RMatrix, RCharacter> {
-        self.new_matrix(STRSXP, nrow, ncol)
-    }
-
-    #[allow(clippy::mut_from_ref)]
-    fn new_array<T>(&self, code: u32, dim: &[usize]) -> &mut RObject<RArray, T> {
-        let d = dim.to_r(self);
-        self.transmute_sexp_mut(self.protect(unsafe { Rf_allocArray(code, d.sexp()) }))
-    }
-
-    /// Create a new array of storage mode "double".
-    pub fn new_array_double(&self, dim: &[usize]) -> &mut RObject<RArray, f64> {
-        self.new_array::<f64>(REALSXP, dim)
-    }
-
-    /// Create a new array of storage mode "integer".
-    pub fn new_array_integer(&self, dim: &[usize]) -> &mut RObject<RArray, i32> {
-        self.new_array::<i32>(INTSXP, dim)
-    }
-
-    /// Create a new array of storage mode "raw".
-    pub fn new_array_raw(&self, dim: &[usize]) -> &mut RObject<RArray, u8> {
-        self.new_array::<u8>(RAWSXP, dim)
-    }
-
-    /// Create a new array of storage mode "logical".
-    pub fn new_array_logical(&self, dim: &[usize]) -> &mut RObject<RArray, bool> {
-        self.new_array::<bool>(LGLSXP, dim)
-    }
-
-    /// Create a new array of storage mode "character".
-    pub fn new_array_character(&self, dim: &[usize]) -> &mut RObject<RArray, RCharacter> {
-        self.new_array::<RCharacter>(STRSXP, dim)
-    }
-
-    /// Create a new list.
-    #[allow(clippy::mut_from_ref)]
-    pub fn new_list(&self, length: usize) -> &mut RObject<RList> {
-        let sexp =
-            self.protect(unsafe { Rf_allocVector(VECSXP, length.try_into().stop_str(TOO_LONG)) });
-        self.transmute_sexp_mut(sexp)
-    }
-
-    /// Define a new error.
-    ///
-    /// This does *not* throw an error.  To throw an R error, simply use `stop!`.
-    ///
-    pub fn new_error(&self, message: &str) -> &RObject {
-        let list = self.new_list(2);
-        let _ = list.set(0, message.to_r(self));
-        let _ = list.set(1, Self::null());
-        let _ = list.set_names(["message", "calls"].to_r(self));
-        list.set_class(["error", "condition"].to_r(self));
-        list.transmute()
-    }
-
-    /// Define a new symbol.
-    #[allow(clippy::mut_from_ref)]
-    pub fn new_symbol(&self, x: &str) -> &mut RObject<RSymbol> {
-        let sexp = self.protect(unsafe {
-            Rf_mkCharLenCE(
-                x.as_ptr() as *const c_char,
-                x.len().try_into().stop_str(TOO_LONG),
-                cetype_t_CE_UTF8,
-            )
-        });
-        let sexp = self.protect(unsafe { Rf_installChar(sexp) });
-        self.transmute_sexp_mut(sexp)
-    }
-
-    /// Get R's "dim" symbol.
-    pub fn symbol_dim() -> &'static RObject<RSymbol> {
-        Self::transmute_sexp_static(unsafe { R_DimSymbol })
-    }
-
-    /// Get R's "names" symbol.
-    pub fn symbol_names() -> &'static RObject<RSymbol> {
-        Self::transmute_sexp_static(unsafe { R_NamesSymbol })
-    }
-
-    /// Get R's "rownames" symbol.
-    pub fn symbol_rownames() -> &'static RObject<RSymbol> {
-        Self::transmute_sexp_static(unsafe { R_RowNamesSymbol })
-    }
-
-    /// Get R's "dimnames" symbol.
-    pub fn symbol_dimnames() -> &'static RObject<RSymbol> {
-        Self::transmute_sexp_static(unsafe { R_DimNamesSymbol })
-    }
-
-    /// Get R's "class" symbol.
-    pub fn symbol_class() -> &'static RObject<RSymbol> {
-        Self::transmute_sexp_static(unsafe { R_ClassSymbol })
-    }
-
-    /// Move Rust object to an R external pointer.
-    ///
-    /// This *method* moves a Rust object to an R external pointer and then, as far as Rust is concerned, leaks the memory.
-    /// Thus the programmer is then responsible to release the memory by calling [`RObject::decode_val`].
-    ///
-    #[allow(clippy::mut_from_ref)]
-    pub fn encode_full<T, RType, RMode>(
-        &self,
-        x: T,
-        tag: &RObject<RType, RMode>,
-        managed_by_r: bool,
-    ) -> &mut RObject<RExternalPtr> {
-        unsafe {
-            let ptr = Box::into_raw(Box::new(x));
-            let sexp = self.protect(R_MakeExternalPtr(
-                ptr as *mut c_void,
-                tag.sexp(),
-                R_NilValue,
-            ));
-            if managed_by_r {
-                unsafe extern "C" fn free<S>(sexp: SEXP) {
-                    let addr = R_ExternalPtrAddr(sexp);
-                    if addr.as_ref().is_none() {
-                        return;
-                    }
-                    let _ = Box::from_raw(addr as *mut S);
-                    R_ClearExternalPtr(sexp);
-                }
-                Rf_setAttrib(sexp, R_AtsignSymbol, R_AtsignSymbol);
-                R_RegisterCFinalizerEx(sexp, Some(free::<T>), 0);
-            }
-            self.transmute_sexp_mut(sexp)
-        }
-    }
-
-    /// Move Rust object to an R external pointer.
-    ///
-    /// This *method* moves a Rust object to an R external pointer and then, as far as Rust is concerned, leaks the memory.
-    /// Thus the programmer is then responsible to release the memory by calling [`RObject::decode_val`].
-    ///
-    #[allow(clippy::mut_from_ref)]
-    pub fn encode<T>(&self, x: T, tag: &str) -> &mut RObject<RExternalPtr> {
-        self.encode_full(x, tag.to_r(self), true)
-    }
-
+impl R {
     /// Returns an R NULL value.
     pub fn null() -> &'static RObject {
-        Self::transmute_sexp_static(unsafe { R_NilValue })
+        Pc::transmute_sexp_static(unsafe { R_NilValue })
     }
 
     /// Returns an R NA value for storage mode "double".
@@ -416,12 +219,6 @@ impl Pc {
     }
 }
 
-#[repr(C)]
-pub struct RObject<RType = RAnyType, RMode = RUnknown> {
-    pub sexprec: SEXPREC,
-    rtype: PhantomData<(RType, RMode)>,
-}
-
 impl<RType, RMode> RObject<RType, RMode> {
     pub fn sexp(&self) -> SEXP {
         self as *const RObject<RType, RMode> as SEXP
@@ -442,8 +239,8 @@ impl<RType, RMode> RObject<RType, RMode> {
         unsafe { std::mem::transmute::<&Self, &RObject<RTypeTo, RModeTo>>(self) }
     }
 
-    fn transmute_mut<'a, 'b, RTypeTo, RModeTo>(&'a mut self) -> &'b mut RObject<RTypeTo, RModeTo> {
-        unsafe { std::mem::transmute::<&'a mut Self, &'b mut RObject<RTypeTo, RModeTo>>(self) }
+    fn transmute_mut<RTypeTo, RModeTo>(&mut self) -> &mut RObject<RTypeTo, RModeTo> {
+        unsafe { std::mem::transmute::<&mut Self, &mut RObject<RTypeTo, RModeTo>>(self) }
     }
 
     /// Duplicate an object.
@@ -481,7 +278,7 @@ impl<RType, RMode> RObject<RType, RMode> {
         }
     }
 
-    pub fn scalar_mut<'a>(&mut self) -> Result<&'a mut RObject<RScalar>, &'static str> {
+    pub fn scalar_mut(&mut self) -> Result<&mut RObject<RScalar>, &'static str> {
         let s = self.vector()?;
         if s.is_scalar() {
             Ok(self.transmute_mut())
@@ -498,7 +295,7 @@ impl<RType, RMode> RObject<RType, RMode> {
         }
     }
 
-    pub fn vector_mut<'a>(&mut self) -> Result<&'a mut RObject<RVector>, &'static str> {
+    pub fn vector_mut(&mut self) -> Result<&mut RObject<RVector>, &'static str> {
         if self.is_vector() {
             Ok(self.transmute_mut())
         } else {
@@ -518,7 +315,7 @@ impl<RType, RMode> RObject<RType, RMode> {
 
     /// Check if appropriate to characterize as an RObject<RMatrix>.
     /// Checks using R's `Rf_isMatrix` function.
-    pub fn matrix_mut<'a>(&mut self) -> Result<&'a mut RObject<RMatrix>, &'static str> {
+    pub fn matrix_mut(&mut self) -> Result<&mut RObject<RMatrix>, &'static str> {
         if self.is_matrix() {
             Ok(self.transmute_mut())
         } else {
@@ -538,7 +335,7 @@ impl<RType, RMode> RObject<RType, RMode> {
 
     /// Check if appropriate to characterize as an RObject<RArray>.
     /// Checks using R's `Rf_isArray` function.
-    pub fn array_mut<'a>(&mut self) -> Result<&'a mut RObject<RArray>, &'static str> {
+    pub fn array_mut(&mut self) -> Result<&mut RObject<RArray>, &'static str> {
         if self.is_array() {
             Ok(self.transmute_mut())
         } else {
@@ -558,7 +355,7 @@ impl<RType, RMode> RObject<RType, RMode> {
 
     /// Check if appropriate to characterize as an RObject<RVector, RList>.
     /// Checks using R's `Rf_isVectorList` function.
-    pub fn list_mut<'a>(&mut self) -> Result<&'a mut RObject<RList>, &'static str> {
+    pub fn list_mut(&mut self) -> Result<&mut RObject<RList>, &'static str> {
         if self.is_list() {
             Ok(self.transmute_mut())
         } else {
@@ -578,9 +375,7 @@ impl<RType, RMode> RObject<RType, RMode> {
 
     /// Check if appropriate to characterize as an RObject<RVector, RDataFrame>.
     /// Checks using R's `Rf_isFrame` function.
-    pub fn data_frame_mut<'a>(
-        &mut self,
-    ) -> Result<&'a mut RObject<RList, RDataFrame>, &'static str> {
+    pub fn data_frame_mut(&mut self) -> Result<&mut RObject<RList, RDataFrame>, &'static str> {
         if self.is_data_frame() {
             Ok(self.transmute_mut())
         } else {
@@ -600,7 +395,7 @@ impl<RType, RMode> RObject<RType, RMode> {
 
     /// Check if appropriate to characterize as an RObject<RFunction>.
     /// Checks using R's `Rf_isFunction` function.
-    pub fn function_mut<'a>(&mut self) -> Result<&'a mut RObject<RFunction>, &'static str> {
+    pub fn function_mut(&mut self) -> Result<&mut RObject<RFunction>, &'static str> {
         if self.is_function() {
             Ok(self.transmute_mut())
         } else {
@@ -620,7 +415,7 @@ impl<RType, RMode> RObject<RType, RMode> {
 
     /// Check if appropriate to characterize as an RObject<RExternalPtr>.
     /// Uses the SEXP type to determine if this is possible.
-    pub fn external_ptr_mut<'a>(&mut self) -> Result<&'a mut RObject<RExternalPtr>, &'static str> {
+    pub fn external_ptr_mut(&mut self) -> Result<&mut RObject<RExternalPtr>, &'static str> {
         if self.is_external_ptr() {
             Ok(self.transmute_mut())
         } else {
@@ -640,7 +435,7 @@ impl<RType, RMode> RObject<RType, RMode> {
 
     /// Check if appropriate to characterize as an RObject<RExternalPtr>.
     /// Uses the SEXP type to determine if this is possible.
-    pub fn symbol_mut<'a>(&mut self) -> Result<&'a mut RObject<RSymbol>, &'static str> {
+    pub fn symbol_mut(&mut self) -> Result<&mut RObject<RSymbol>, &'static str> {
         if self.is_symbol() {
             Ok(self.transmute_mut())
         } else {
@@ -661,9 +456,9 @@ impl<RType, RMode> RObject<RType, RMode> {
                 if s.is_double() {
                     unsafe { R_IsNA(Rf_asReal(s.sexp())) != 0 }
                 } else if s.is_integer() {
-                    unsafe { Rf_asInteger(s.sexp()) == Pc::na_integer() }
+                    unsafe { Rf_asInteger(s.sexp()) == R::na_integer() }
                 } else if s.is_logical() {
-                    unsafe { Rf_asLogical(s.sexp()) == Pc::na_logical() }
+                    unsafe { Rf_asLogical(s.sexp()) == R::na_logical() }
                 } else if s.is_character() {
                     unsafe { Rf_asChar(s.sexp()) == R_NaString }
                 } else {
@@ -743,12 +538,70 @@ impl<RType, RMode> RObject<RType, RMode> {
 
     /// Get the class or classes of the data in an RObject.
     pub fn get_class(&self) -> &RObject<RVector, RCharacter> {
-        self.transmute_sexp(unsafe { Rf_getAttrib(self.sexp(), Pc::symbol_class().sexp()) })
+        self.transmute_sexp(unsafe {
+            Rf_getAttrib(self.sexp(), RObject::<RSymbol>::class().sexp())
+        })
     }
 
     /// Get an attribute.
     pub fn get_attribute(&self, which: &RObject<RSymbol>) -> &RObject {
         self.transmute_sexp(unsafe { Rf_getAttrib(self.sexp(), which.sexp()) })
+    }
+}
+
+impl RObject<RError> {
+    /// Define a new error.
+    ///
+    /// This does *not* throw an error.  To throw an R error, simply use `stop!`.
+    ///
+    pub fn new<'a>(message: &str, pc: &'a Pc) -> &'a mut Self {
+        let list = RObject::<RList>::new(2, pc);
+        let _ = list.set(0, message.to_r(pc));
+        let _ = list.set(1, R::null());
+        let _ = list.set_names(["message", "calls"].to_r(pc));
+        list.set_class(["error", "condition"].to_r(pc));
+        list.transmute_mut()
+    }
+}
+
+impl RObject<RSymbol> {
+    /// Define a new symbol.
+    #[allow(clippy::mut_from_ref)]
+    pub fn new<'a>(x: &str, pc: &'a Pc) -> &'a mut Self {
+        let sexp = pc.protect(unsafe {
+            Rf_mkCharLenCE(
+                x.as_ptr() as *const c_char,
+                x.len().try_into().stop_str(TOO_LONG),
+                cetype_t_CE_UTF8,
+            )
+        });
+        let sexp = pc.protect(unsafe { Rf_installChar(sexp) });
+        pc.transmute_sexp_mut(sexp)
+    }
+
+    /// Get R's "dim" symbol.
+    pub fn dim() -> &'static Self {
+        Pc::transmute_sexp_static(unsafe { R_DimSymbol })
+    }
+
+    /// Get R's "names" symbol.
+    pub fn names() -> &'static Self {
+        Pc::transmute_sexp_static(unsafe { R_NamesSymbol })
+    }
+
+    /// Get R's "rownames" symbol.
+    pub fn rownames() -> &'static Self {
+        Pc::transmute_sexp_static(unsafe { R_RowNamesSymbol })
+    }
+
+    /// Get R's "dimnames" symbol.
+    pub fn dimnames() -> &'static Self {
+        Pc::transmute_sexp_static(unsafe { R_DimNamesSymbol })
+    }
+
+    /// Get R's "class" symbol.
+    pub fn class() -> &'static Self {
+        Pc::transmute_sexp_static(unsafe { R_ClassSymbol })
     }
 }
 
@@ -789,7 +642,7 @@ impl<RType: RAtomic + RHasLength, RMode> RObject<RType, RMode> {
     }
 
     /// Check if appropriate to characterize storage mode as "double".
-    pub fn double_mut<'a>(&mut self) -> Result<&'a mut RObject<RType, f64>, &'static str> {
+    pub fn double_mut(&mut self) -> Result<&mut RObject<RType, f64>, &'static str> {
         if self.is_double() {
             Ok(self.transmute_mut())
         } else {
@@ -813,7 +666,7 @@ impl<RType: RAtomic + RHasLength, RMode> RObject<RType, RMode> {
     }
 
     /// Attempts to coerce storage mode to "double".
-    pub fn to_double_mut<'a>(&mut self, pc: &Pc) -> &'a mut RObject<RType, f64> {
+    pub fn to_double_mut(&mut self, pc: &Pc) -> &mut RObject<RType, f64> {
         if self.is_double() {
             self.transmute_mut()
         } else {
@@ -832,7 +685,7 @@ impl<RType: RAtomic + RHasLength, RMode> RObject<RType, RMode> {
     }
 
     /// Check if appropriate to characterize storage mode as "double".
-    pub fn integer_mut<'a>(&mut self) -> Result<&'a mut RObject<RType, i32>, &'static str> {
+    pub fn integer_mut(&mut self) -> Result<&mut RObject<RType, i32>, &'static str> {
         if self.is_integer() {
             Ok(self.transmute_mut())
         } else {
@@ -856,7 +709,7 @@ impl<RType: RAtomic + RHasLength, RMode> RObject<RType, RMode> {
     }
 
     /// Attempts to coerce storage mode to "double".
-    pub fn to_integer_mut<'a>(&mut self, pc: &Pc) -> &'a mut RObject<RType, i32> {
+    pub fn to_integer_mut(&mut self, pc: &Pc) -> &mut RObject<RType, i32> {
         if self.is_integer() {
             self.transmute_mut()
         } else {
@@ -875,7 +728,7 @@ impl<RType: RAtomic + RHasLength, RMode> RObject<RType, RMode> {
     }
 
     /// Check if appropriate to characterize storage mode as "double".
-    pub fn raw_mut<'a>(&mut self) -> Result<&'a mut RObject<RType, u8>, &'static str> {
+    pub fn raw_mut(&mut self) -> Result<&mut RObject<RType, u8>, &'static str> {
         if self.is_raw() {
             Ok(self.transmute_mut())
         } else {
@@ -899,7 +752,7 @@ impl<RType: RAtomic + RHasLength, RMode> RObject<RType, RMode> {
     }
 
     /// Attempts to coerce storage mode to "double".
-    pub fn to_raw_mut<'a>(&mut self, pc: &Pc) -> &'a mut RObject<RType, u8> {
+    pub fn to_raw_mut(&mut self, pc: &Pc) -> &mut RObject<RType, u8> {
         if self.is_raw() {
             self.transmute_mut()
         } else {
@@ -918,7 +771,7 @@ impl<RType: RAtomic + RHasLength, RMode> RObject<RType, RMode> {
     }
 
     /// Check if appropriate to characterize storage mode as "double".
-    pub fn logical_mut<'a>(&mut self) -> Result<&'a mut RObject<RType, bool>, &'static str> {
+    pub fn logical_mut(&mut self) -> Result<&mut RObject<RType, bool>, &'static str> {
         if self.is_logical() {
             Ok(self.transmute_mut())
         } else {
@@ -942,7 +795,7 @@ impl<RType: RAtomic + RHasLength, RMode> RObject<RType, RMode> {
     }
 
     /// Attempts to coerce storage mode to "double".
-    pub fn to_logical_mut<'a>(&mut self, pc: &Pc) -> &'a mut RObject<RType, bool> {
+    pub fn to_logical_mut(&mut self, pc: &Pc) -> &mut RObject<RType, bool> {
         if self.is_logical() {
             self.transmute_mut()
         } else {
@@ -961,9 +814,7 @@ impl<RType: RAtomic + RHasLength, RMode> RObject<RType, RMode> {
     }
 
     /// Check if appropriate to characterize storage mode as "double".
-    pub fn character_mut<'a>(
-        &mut self,
-    ) -> Result<&'a mut RObject<RType, RCharacter>, &'static str> {
+    pub fn character_mut(&mut self) -> Result<&mut RObject<RType, RCharacter>, &'static str> {
         if self.is_character() {
             Ok(self.transmute_mut())
         } else {
@@ -987,7 +838,7 @@ impl<RType: RAtomic + RHasLength, RMode> RObject<RType, RMode> {
     }
 
     /// Attempts to coerce storage mode to "double".
-    pub fn to_character_mut<'a>(&mut self, pc: &Pc) -> &'a mut RObject<RType, RCharacter> {
+    pub fn to_character_mut(&mut self, pc: &Pc) -> &mut RObject<RType, RCharacter> {
         if self.is_character() {
             self.transmute_mut()
         } else {
@@ -998,6 +849,7 @@ impl<RType: RAtomic + RHasLength, RMode> RObject<RType, RMode> {
 }
 
 impl<RMode> RObject<RVector, RMode> {
+    #[allow(clippy::mut_from_ref)]
     fn new_engine(code: u32, length: usize, pc: &Pc) -> &mut Self {
         let sexp =
             pc.protect(unsafe { Rf_allocVector(code, length.try_into().stop_str(TOO_LONG)) });
@@ -1006,16 +858,16 @@ impl<RMode> RObject<RVector, RMode> {
 }
 
 macro_rules! rslice {
-    ($tipe:ty, $tipe2:ty, $code1:expr) => {
+    ($tipe:ty, $tipe2:ty, $code:expr) => {
         impl<RType: RAtomic + RHasLength> RObject<RType, $tipe> {
             /// Returns a slice of the data structure.
             pub fn slice(&self) -> &[$tipe2] {
-                self.slice_engine(unsafe { $code1(self.sexp()) })
+                self.slice_engine(unsafe { $code(self.sexp()) })
             }
 
             /// Returns a slice of the data structure.
             pub fn slice_mut(&mut self) -> &mut [$tipe2] {
-                self.slice_mut_engine(unsafe { $code1(self.sexp()) })
+                self.slice_mut_engine(unsafe { $code(self.sexp()) })
             }
         }
     };
@@ -1026,11 +878,13 @@ rslice!(i32, i32, INTEGER);
 rslice!(u8, u8, RAW);
 rslice!(bool, i32, LOGICAL);
 
-impl<RMode> RObject<RMatrix, RMode> {
-    //asdf
-}
-
 impl<RType> RObject<RArray, RType> {
+    #[allow(clippy::mut_from_ref)]
+    fn new_engine<'a>(code: u32, dim: &[usize], pc: &'a Pc) -> &'a mut RObject<RArray, RType> {
+        let d = dim.to_r(pc);
+        pc.transmute_sexp_mut(pc.protect(unsafe { Rf_allocArray(code, d.sexp()) }))
+    }
+
     /// Returns the dimensions of the RArray.
     pub fn dim(&self) -> Vec<usize> {
         let d =
@@ -1045,6 +899,22 @@ impl<RType> RObject<RArray, RType> {
         self.transmute_mut()
     }
 }
+
+macro_rules! rarray {
+    ($tipe:ty, $code:expr) => {
+        impl RObject<RArray, $tipe> {
+            pub fn new<'a>(dim: &[usize], pc: &'a Pc) -> &'a mut Self {
+                Self::new_engine($code, dim, pc)
+            }
+        }
+    };
+}
+
+rarray!(f64, REALSXP);
+rarray!(i32, INTSXP);
+rarray!(u8, RAWSXP);
+rarray!(bool, LGLSXP);
+rarray!(RCharacter, STRSXP);
 
 impl RObject<RFunction> {
     fn eval(expression: SEXP, pc: &Pc) -> Result<&RObject, i32> {
@@ -1266,9 +1136,9 @@ impl<RMode> RObject<RScalar, RMode> {
             }
         } else if self.is_double() {
             let y = unsafe { Rf_asReal(self.sexp()) };
-            if Pc::is_na_double(y) {
+            if R::is_na_double(y) {
                 Err("Equals R's NA for doubles")
-            } else if Pc::is_nan(y) {
+            } else if R::is_nan(y) {
                 Err("Equals R's NaN")
             } else {
                 Ok(y != 0.0)
@@ -1294,16 +1164,17 @@ impl<RMode> RObject<RScalar, RMode> {
     }
 
     /// Manipulates the matrix in place to be a vector by dropping the `dim` attribute.
-    pub fn as_vector(&self) -> &RObject<RVector, RMode> {
-        self.transmute()
+    pub fn as_vector(&mut self) -> &mut RObject<RVector, RMode> {
+        self.transmute_mut()
     }
 }
 
 macro_rules! rscalar {
-    ($tipe:ty, $tipe2:ty, $code1:expr) => {
+    ($tipe:ty, $tipe2:ty, $code:expr) => {
         impl RObject<RScalar, $tipe> {
+            #[allow(clippy::mut_from_ref)]
             pub fn from_value(value: $tipe2, pc: &Pc) -> &mut Self {
-                pc.transmute_sexp_mut(pc.protect(unsafe { $code1(value) }))
+                pc.transmute_sexp_mut(pc.protect(unsafe { $code(value) }))
             }
 
             /// Get the value at a certain index in an $tipe RVector.
@@ -1337,6 +1208,7 @@ impl RObject<RScalar, bool> {
 }
 
 impl RObject<RScalar, RCharacter> {
+    #[allow(clippy::mut_from_ref)]
     pub fn from_value<'a>(value: &str, pc: &'a Pc) -> &'a mut Self {
         let sexp = unsafe {
             Rf_ScalarString(Rf_mkCharLenCE(
@@ -1436,7 +1308,7 @@ macro_rules! rvector {
                 result
             }
 
-            pub fn from_iter<'a, T>(iter: T, pc: &'a Pc) -> &'a mut Self
+            pub fn from_iter<T>(iter: T, pc: &Pc) -> &mut Self
             where
                 T: IntoIterator<Item = $tipe2> + ExactSizeIterator,
             {
@@ -1562,8 +1434,11 @@ impl<RMode> RListMap<'_, RMode> {
 }
 
 impl RObject<RList> {
+    #[allow(clippy::mut_from_ref)]
     pub fn new(length: usize, pc: &Pc) -> &mut Self {
-        pc.new_list(length)
+        let sexp =
+            pc.protect(unsafe { Rf_allocVector(VECSXP, length.try_into().stop_str(TOO_LONG)) });
+        pc.transmute_sexp_mut(sexp)
     }
 }
 
@@ -1638,7 +1513,7 @@ impl<RMode> RObject<RList, RMode> {
 
     /// Convert an RList to an RDataFrame.
     pub fn to_data_frame<'a>(
-        &mut self,
+        &'a mut self,
         names: &RObject<RVector, RCharacter>,
         rownames: &RObject<RVector, RCharacter>,
         pc: &Pc,
@@ -1689,6 +1564,7 @@ impl RObject<RList, RDataFrame> {
 }
 
 impl<RMode> RObject<RMatrix, RMode> {
+    #[allow(clippy::mut_from_ref)]
     fn new_engine(code: u32, nrow: usize, ncol: usize, pc: &Pc) -> &mut Self {
         let sexp = pc.protect(unsafe {
             Rf_allocMatrix(
@@ -1720,18 +1596,18 @@ impl<RMode> RObject<RMatrix, RMode> {
     pub fn transpose<'a>(&self, pc: &'a Pc) -> &'a mut RObject<RMatrix, RMode> {
         let transposed = self.clone(pc);
         let dim: &mut RObject<RVector, i32> = self
-            .get_attribute(Pc::symbol_dim())
+            .get_attribute(RObject::<RSymbol>::dim())
             .clone(pc)
             .transmute_mut();
         let slice = dim.slice_mut();
         slice.swap(0, 1);
-        transposed.set_attribute(Pc::symbol_dim(), dim);
+        transposed.set_attribute(RObject::<RSymbol>::dim(), dim);
         unsafe { Rf_copyMatrix(transposed.sexp(), self.sexp(), Rboolean_TRUE) };
         transposed
     }
 
     /// Manipulates the matrix in place to be a vector by dropping the `dim` attribute.
-    pub fn as_vector<'a>(&mut self) -> &'a mut RObject<RVector, RMode> {
+    pub fn as_vector(&mut self) -> &mut RObject<RVector, RMode> {
         unsafe { Rf_setAttrib(self.sexp(), R_DimSymbol, R_NilValue) };
         self.transmute_mut()
     }
@@ -1858,35 +1734,32 @@ impl RObject<RMatrix, RCharacter> {
 
     pub fn from_value<'a>(value: &str, nrow: usize, ncol: usize, pc: &'a Pc) -> &'a mut Self {
         let result = Self::new(nrow, ncol, pc);
-        let result2 = result.as_vector();
-        for i in 0..result2.len() {
-            let _ = result2.set(i, value);
+        let vector = result.as_vector();
+        for i in 0..vector.len() {
+            let _ = vector.set(i, value);
         }
         result
     }
 
-    /*
-        pub fn from_slice<'a>(
-            slice: &[&str],
-            nrow: usize,
-            pc: &'a Pc,
-        ) -> Result<&'a mut Self, &'static str> {
-            if nrow == 0 && slice.len() == 0 {
-                return Ok(Self::new(0, 0, pc));
-            }
-            let ncol = slice.len() / nrow;
-            if nrow * ncol != slice.len() {
-                return Err("Slice length is not divisible by 'nrow'");
-            }
-            let result = Self::new(nrow, ncol, pc);
-            for j in 0..ncol {
-                for i in 0..nrow {
-                    let _ = result.set((i, j), value);
-                }
-            }
-            Ok(result)
+    pub fn from_slice<'a>(
+        slice: &[&str],
+        nrow: usize,
+        pc: &'a Pc,
+    ) -> Result<&'a mut Self, &'static str> {
+        if nrow == 0 && slice.is_empty() {
+            return Ok(Self::new(0, 0, pc));
         }
-    */
+        let ncol = slice.len() / nrow;
+        if nrow * ncol != slice.len() {
+            return Err("Slice length is not divisible by 'nrow'");
+        }
+        let result = Self::new(nrow, ncol, pc);
+        let vector = result.as_vector();
+        for (i, v) in slice.iter().enumerate() {
+            let _ = vector.set(i, v);
+        }
+        Ok(result)
+    }
 
     /// Get the value at a certain index in a character RMatrix.
     pub fn get(&self, index: (usize, usize)) -> Result<&str, &'static str> {
@@ -1903,6 +1776,51 @@ impl RObject<RMatrix, RCharacter> {
 }
 
 impl RObject<RExternalPtr> {
+    /// Move Rust object to an R external pointer.
+    ///
+    /// This *method* moves a Rust object to an R external pointer and then, as far as Rust is concerned, leaks the memory.
+    /// Thus the programmer is then responsible to release the memory by calling [`RObject::decode_val`].
+    ///
+    #[allow(clippy::mut_from_ref)]
+    pub fn encode<'a, T>(x: T, tag: &str, pc: &'a Pc) -> &'a mut Self {
+        Self::encode_full(x, tag.to_r(pc), true, pc)
+    }
+
+    /// Move Rust object to an R external pointer.
+    ///
+    /// This *method* moves a Rust object to an R external pointer and then, as far as Rust is concerned, leaks the memory.
+    /// Thus the programmer is then responsible to release the memory by calling [`RObject::decode_val`].
+    ///
+    #[allow(clippy::mut_from_ref)]
+    pub fn encode_full<'a, T, RType, RMode>(
+        x: T,
+        tag: &RObject<RType, RMode>,
+        managed_by_r: bool,
+        pc: &'a Pc,
+    ) -> &'a mut Self {
+        unsafe {
+            let ptr = Box::into_raw(Box::new(x));
+            let sexp = pc.protect(R_MakeExternalPtr(
+                ptr as *mut c_void,
+                tag.sexp(),
+                R_NilValue,
+            ));
+            if managed_by_r {
+                unsafe extern "C" fn free<S>(sexp: SEXP) {
+                    let addr = R_ExternalPtrAddr(sexp);
+                    if addr.as_ref().is_none() {
+                        return;
+                    }
+                    let _ = Box::from_raw(addr as *mut S);
+                    R_ClearExternalPtr(sexp);
+                }
+                Rf_setAttrib(sexp, R_AtsignSymbol, R_AtsignSymbol);
+                R_RegisterCFinalizerEx(sexp, Some(free::<T>), 0);
+            }
+            pc.transmute_sexp_mut(sexp)
+        }
+    }
+
     /// Check if an external pointer is managed by R.
     pub fn is_managed_by_r(&self) -> bool {
         unsafe { Rf_getAttrib(self.sexp(), R_AtsignSymbol) == R_AtsignSymbol }
@@ -2022,6 +1940,7 @@ macro_rules! r_from_scalar {
     ($tipe:ty, $tipe2:ty, $code:expr) => {
         impl<'a> ToR<'a, RScalar, $tipe> for $tipe2 {
             fn to_r(&self, pc: &'a Pc) -> &'a mut RObject<RScalar, $tipe> {
+                #[allow(clippy::redundant_closure_call)]
                 RObject::<RScalar, $tipe>::from_value($code(*self), pc)
             }
         }

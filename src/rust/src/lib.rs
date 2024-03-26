@@ -6,11 +6,8 @@ use roxido::*;
 
 #[roxido]
 fn convolve2(a: &RObject<RVector>, b: &RObject<RVector>) {
-    let r = RObject::<RVector, f64>::new(a.len() + b.len() - 1, pc);
+    let r = RObject::<RVector, f64>::from_value(0.0, a.len() + b.len() - 1, pc);
     let ab = r.slice_mut();
-    for abi in ab.iter_mut() {
-        *abi = 0.0;
-    }
     for (i, ai) in a.to_double(pc).slice().iter().enumerate() {
         for (j, bj) in b.to_double(pc).slice().iter().enumerate() {
             ab[i + j] += ai * bj;

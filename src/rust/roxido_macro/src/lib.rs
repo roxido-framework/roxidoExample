@@ -470,7 +470,7 @@ fn roxido_fn(options: Vec<NestedMeta>, item_fn: syn::ItemFn) -> TokenStream {
                         unsafe {
                             crate::rbindings::Rf_error(b"%.*s\0".as_ptr() as *const std::os::raw::c_char, len, crate::rbindings::R_CHAR(sexp));
                         }
-                        crate::Pc::null().sexp()  // We never get here.
+                        crate::R::null().sexp()  // We never get here.
                     }
                 }
             }
