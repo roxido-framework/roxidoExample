@@ -22,15 +22,16 @@ impl RMatrix2Faer for RObject<RMatrix, f64> {
     }
 }
 
-pub trait ToR1<'a, RType, RMode> {
-    fn to_r(&self, pc: &'a Pc) -> &'a RObject<RType, RMode>;
+pub trait ToR<'a, RType, RMode> {
+    #[allow(clippy::mut_from_ref)]
+    fn to_r(&self, pc: &'a Pc) -> &'a mut RObject<RType, RMode>;
 }
 
-impl<'a> ToR1<'a, RMatrix, f64> for MatRef<'a, f64> {
-    fn to_r(&self, pc: &'a Pc) -> &'a RObject<RMatrix, f64> {
+impl<'a> ToR<'a, RMatrix, f64> for MatRef<'a, f64> {
+    fn to_r(&self, pc: &'a Pc) -> &'a mut RObject<RMatrix, f64> {
         let nr = self.nrows();
         let nc = self.ncols();
-        let result = pc.new_matrix_double(nr, nc);
+        let result = RObject::<RMatrix, f64>::new(nr, nc, pc);
         for (k, r) in result.slice_mut().iter_mut().enumerate() {
             *r = self.read(k % nr, k / nc);
         }
