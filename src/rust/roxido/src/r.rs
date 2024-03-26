@@ -113,13 +113,6 @@ impl Pc {
         unsafe { &*sexp.cast::<RObject<RTypeTo, RModeTo>>() }
     }
 
-    /// Create a new scalar (i.e., a vector of length 1) of storage mode "double".
-    #[allow(clippy::mut_from_ref)]
-    pub fn new_scalar_double(&self, x: f64) -> &mut RObject<RScalar, f64> {
-        let sexp = self.protect(unsafe { Rf_ScalarReal(x) });
-        self.transmute_sexp_mut(sexp)
-    }
-
     /// Create a new scalar (i.e., a vector of length 1) of storage mode "integer".
     #[allow(clippy::mut_from_ref)]
     pub fn new_scalar_integer(&self, x: i32) -> &mut RObject<RScalar, i32> {
@@ -152,37 +145,6 @@ impl Pc {
             ))
         };
         self.transmute_sexp_mut(self.protect(sexp))
-    }
-
-    fn new_vector<'a, RMode>(&self, code: u32, length: usize) -> &'a mut RObject<RVector, RMode> {
-        let sexp =
-            self.protect(unsafe { Rf_allocVector(code, length.try_into().stop_str(TOO_LONG)) });
-        self.transmute_sexp_mut(sexp)
-    }
-
-    /// Create a new vector of storage mode "double".
-    pub fn new_vector_double(&self, length: usize) -> &mut RObject<RVector, f64> {
-        self.new_vector(REALSXP, length)
-    }
-
-    /// Create a new vector of type storage mode "integer".
-    pub fn new_vector_integer(&self, length: usize) -> &mut RObject<RVector, i32> {
-        self.new_vector(INTSXP, length)
-    }
-
-    /// Create a new vector of storage mode "raw".
-    pub fn new_vector_raw(&self, length: usize) -> &mut RObject<RVector, u8> {
-        self.new_vector(RAWSXP, length)
-    }
-
-    /// Create a new vector of storage mode "logical".
-    pub fn new_vector_logical(&self, length: usize) -> &mut RObject<RVector, bool> {
-        self.new_vector(LGLSXP, length)
-    }
-
-    /// Create a new vector of storage mode "character".
-    pub fn new_vector_character(&self, length: usize) -> &mut RObject<RVector, RCharacter> {
-        self.new_vector(STRSXP, length)
     }
 
     fn new_matrix<'a, RMode>(
@@ -232,10 +194,7 @@ impl Pc {
 
     #[allow(clippy::mut_from_ref)]
     fn new_array<T>(&self, code: u32, dim: &[usize]) -> &mut RObject<RArray, T> {
-        let d = dim
-            .iter()
-            .map(|x| i32::try_from(*x).stop_str(TOO_LONG))
-            .to_r(self);
+        let d = dim.to_r(self);
         self.transmute_sexp_mut(self.protect(unsafe { Rf_allocArray(code, d.sexp()) }))
     }
 
@@ -997,7 +956,7 @@ impl<RType: RAtomic + RHasLength, RMode> RObject<RType, RMode> {
         if self.is_character() {
             Ok(self.transmute())
         } else {
-            Err("Not of storage mode 'logical'")
+            Err("Not of storage mode 'character'")
         }
     }
 
@@ -1008,7 +967,7 @@ impl<RType: RAtomic + RHasLength, RMode> RObject<RType, RMode> {
         if self.is_character() {
             Ok(self.transmute_mut())
         } else {
-            Err("Not of storage mode 'logical'")
+            Err("Not of storage mode 'character'")
         }
     }
 
@@ -1038,90 +997,37 @@ impl<RType: RAtomic + RHasLength, RMode> RObject<RType, RMode> {
     }
 }
 
-impl<RType: RAtomic + RHasLength> RObject<RType, f64> {
-    /// Returns a slice of the data structure.
-    pub fn slice(&self) -> &[f64] {
-        self.slice_engine(unsafe { REAL(self.sexp()) })
-    }
-
-    /// Returns a slice of the data structure.
-    pub fn slice_mut(&mut self) -> &mut [f64] {
-        self.slice_mut_engine(unsafe { REAL(self.sexp()) })
+impl<RMode> RObject<RVector, RMode> {
+    fn new_engine(code: u32, length: usize, pc: &Pc) -> &mut Self {
+        let sexp =
+            pc.protect(unsafe { Rf_allocVector(code, length.try_into().stop_str(TOO_LONG)) });
+        pc.transmute_sexp_mut(sexp)
     }
 }
 
-impl<RType: RAtomic + RHasLength> RObject<RType, i32> {
-    /// Returns a slice of the data structure.
-    pub fn slice(&self) -> &[i32] {
-        self.slice_engine(unsafe { INTEGER(self.sexp()) })
-    }
+macro_rules! rslice {
+    ($tipe:ty, $tipe2:ty, $code1:expr) => {
+        impl<RType: RAtomic + RHasLength> RObject<RType, $tipe> {
+            /// Returns a slice of the data structure.
+            pub fn slice(&self) -> &[$tipe2] {
+                self.slice_engine(unsafe { $code1(self.sexp()) })
+            }
 
-    /// Returns a slice of the data structure.
-    pub fn slice_mut(&mut self) -> &mut [i32] {
-        self.slice_mut_engine(unsafe { INTEGER(self.sexp()) })
-    }
+            /// Returns a slice of the data structure.
+            pub fn slice_mut(&mut self) -> &mut [$tipe2] {
+                self.slice_mut_engine(unsafe { $code1(self.sexp()) })
+            }
+        }
+    };
 }
 
-impl<RType: RAtomic + RHasLength> RObject<RType, u8> {
-    /// Returns a slice of the data structure.
-    pub fn slice(&self) -> &[u8] {
-        self.slice_engine(unsafe { RAW(self.sexp()) })
-    }
-
-    /// Returns a slice of the data structure.
-    pub fn slice_mut(&mut self) -> &mut [u8] {
-        self.slice_mut_engine(unsafe { RAW(self.sexp()) })
-    }
-}
-
-impl<RType: RAtomic + RHasLength> RObject<RType, bool> {
-    /// Returns a slice of the data structure.
-    pub fn slice(&self) -> &[i32] {
-        self.slice_engine(unsafe { LOGICAL(self.sexp()) })
-    }
-
-    /// Returns a slice of the data structure.
-    pub fn slice_mut(&mut self) -> &mut [i32] {
-        self.slice_mut_engine(unsafe { LOGICAL(self.sexp()) })
-    }
-}
+rslice!(f64, f64, REAL);
+rslice!(i32, i32, INTEGER);
+rslice!(u8, u8, RAW);
+rslice!(bool, i32, LOGICAL);
 
 impl<RMode> RObject<RMatrix, RMode> {
-    /// Returns the number of rows in the RMatrix.
-    pub fn nrow(&self) -> usize {
-        unsafe { Rf_nrows(self.sexp()).try_into().unwrap() }
-    }
-
-    /// Returns the number of columns in the RMatrix.
-    pub fn ncol(&self) -> usize {
-        unsafe { Rf_ncols(self.sexp()).try_into().unwrap() }
-    }
-
-    /// Returns the dimensions of the RMatrix.
-    pub fn dim(&self) -> [usize; 2] {
-        [self.nrow(), self.ncol()]
-    }
-
-    /// Transpose the matrix.
-    #[allow(clippy::mut_from_ref)]
-    pub fn transpose<'a>(&self, pc: &'a Pc) -> &'a mut RObject<RMatrix, RMode> {
-        let transposed = self.clone(pc);
-        let dim: &mut RObject<RVector, i32> = self
-            .get_attribute(Pc::symbol_dim())
-            .clone(pc)
-            .transmute_mut();
-        let slice = dim.slice_mut();
-        slice.swap(0, 1);
-        transposed.set_attribute(Pc::symbol_dim(), dim);
-        unsafe { Rf_copyMatrix(transposed.sexp(), self.sexp(), Rboolean_TRUE) };
-        transposed
-    }
-
-    /// Manipulates the matrix in place to be a vector by dropping the `dim` attribute.
-    pub fn as_vector<'a>(&mut self) -> &'a mut RObject<RVector, RMode> {
-        unsafe { Rf_setAttrib(self.sexp(), R_DimSymbol, R_NilValue) };
-        self.transmute_mut()
-    }
+    //asdf
 }
 
 impl<RType> RObject<RArray, RType> {
@@ -1134,7 +1040,7 @@ impl<RType> RObject<RArray, RType> {
 
     // Create a new vector from a matrix.
     /// Convert an RArray to a Vector.
-    pub fn as_vector<'a>(&mut self) -> &'a mut RObject<RVector, RType> {
+    pub fn as_vector(&mut self) -> &mut RObject<RVector, RType> {
         unsafe { Rf_setAttrib(self.sexp(), R_DimSymbol, R_NilValue) };
         self.transmute_mut()
     }
@@ -1393,6 +1299,66 @@ impl<RMode> RObject<RScalar, RMode> {
     }
 }
 
+macro_rules! rscalar {
+    ($tipe:ty, $tipe2:ty, $code1:expr) => {
+        impl RObject<RScalar, $tipe> {
+            pub fn from_value(value: $tipe2, pc: &Pc) -> &mut Self {
+                pc.transmute_sexp_mut(pc.protect(unsafe { $code1(value) }))
+            }
+
+            /// Get the value at a certain index in an $tipe RVector.
+            pub fn get(&self) -> $tipe2 {
+                self.transmute::<RVector, $tipe>().get(0).unwrap()
+            }
+
+            /// Set the value at a certain index in an $tipe RVector.
+            pub fn set(&mut self, value: $tipe2) {
+                let _ = self.transmute_mut::<RVector, $tipe>().set(0, value);
+            }
+        }
+    };
+}
+
+rscalar!(f64, f64, Rf_ScalarReal);
+rscalar!(i32, i32, Rf_ScalarInteger);
+rscalar!(u8, u8, Rf_ScalarRaw);
+rscalar!(bool, i32, Rf_ScalarLogical);
+
+impl RObject<RScalar, bool> {
+    /// Get the value at a certain index in a logical RVector.
+    pub fn get_bool(&self) -> bool {
+        self.transmute::<RVector, bool>().get_bool(0).unwrap()
+    }
+
+    /// Set the value at a certain index in a logical RVector.
+    pub fn set_bool(&mut self, value: bool) {
+        let _ = self.transmute_mut::<RVector, bool>().set_bool(0, value);
+    }
+}
+
+impl RObject<RScalar, RCharacter> {
+    pub fn from_value<'a>(value: &str, pc: &'a Pc) -> &'a mut Self {
+        let sexp = unsafe {
+            Rf_ScalarString(Rf_mkCharLenCE(
+                value.as_ptr() as *const c_char,
+                value.len().try_into().stop_str(TOO_LONG),
+                cetype_t_CE_UTF8,
+            ))
+        };
+        pc.transmute_sexp_mut(pc.protect(sexp))
+    }
+
+    /// Get the value at a certain index in an $tipe RVector.
+    pub fn get(&self) -> &str {
+        self.transmute::<RVector, RCharacter>().get(0).unwrap()
+    }
+
+    /// Set the value at a certain index in an $tipe RVector.
+    pub fn set(&mut self, value: &str) {
+        let _ = self.transmute_mut::<RVector, RCharacter>().set(0, value);
+    }
+}
+
 impl<RType: ROneDimensional + RHasLength, RMode> RObject<RType, RMode> {
     fn get_engine<T>(
         &self,
@@ -1449,66 +1415,66 @@ impl<RType: ROneDimensional + RHasLength, RMode> RObject<RType, RMode> {
     }
 }
 
-impl RObject<RVector, f64> {
-    /// Get the value at a certain index in an f64 RVector.
-    pub fn get(&self, index: usize) -> Result<f64, &'static str> {
-        self.get_engine(index, REAL_ELT)
-    }
+macro_rules! rvector {
+    ($tipe:ty, $tipe2:ty, $code1:expr, $code2:expr, $code3:expr) => {
+        impl RObject<RVector, $tipe> {
+            pub fn new(length: usize, pc: &Pc) -> &mut Self {
+                Self::new_engine($code1, length, pc)
+            }
 
-    /// Set the value at a certain index in an f64 RVector.
-    pub fn set(&mut self, index: usize, value: f64) -> Result<(), &'static str> {
-        self.set_engine(index, value, SET_REAL_ELT)
-    }
+            pub fn from_value(value: $tipe2, length: usize, pc: &Pc) -> &mut Self {
+                let result = Self::new(length, pc);
+                let slice = result.slice_mut();
+                slice.fill(value);
+                result
+            }
+
+            pub fn from_slice<'a>(slice: &[$tipe2], pc: &'a Pc) -> &'a mut Self {
+                let result = Self::new(slice.len(), pc);
+                let slice2 = result.slice_mut();
+                slice2.copy_from_slice(slice);
+                result
+            }
+
+            pub fn from_iter<'a, T>(iter: T, pc: &'a Pc) -> &'a mut Self
+            where
+                T: IntoIterator<Item = $tipe2> + ExactSizeIterator,
+            {
+                let result = Self::new(iter.len(), pc);
+                let slice = result.slice_mut();
+                for (s, d) in slice.iter_mut().zip(iter) {
+                    *s = d;
+                }
+                result
+            }
+
+            /// Get the value at a certain index in an $tipe RVector.
+            pub fn get(&self, index: usize) -> Result<$tipe2, &'static str> {
+                self.get_engine(index, $code2)
+            }
+
+            /// Set the value at a certain index in an $tipe RVector.
+            pub fn set(&mut self, index: usize, value: $tipe2) -> Result<(), &'static str> {
+                self.set_engine(index, value, $code3)
+            }
+        }
+    };
 }
 
-impl RObject<RVector, i32> {
-    /// Get the value at a certain index in an i32 RVector.
-    pub fn get(&self, index: usize) -> Result<i32, &'static str> {
-        self.get_engine(index, INTEGER_ELT)
-    }
-
-    /// Set the value at a certain index in an i32 RVector.
-    pub fn set(&mut self, index: usize, value: i32) -> Result<(), &'static str> {
-        self.set_engine(index, value, SET_INTEGER_ELT)
-    }
-}
-
-impl RObject<RVector, u8> {
-    /// Get the value at a certain index in a u8 RVector.
-    pub fn get(&self, index: usize) -> Result<u8, &'static str> {
-        self.get_engine(index, RAW_ELT)
-    }
-
-    /// Set the value at a certain index in a u8 RVector.
-    pub fn set(&mut self, index: usize, value: u8) -> Result<(), &'static str> {
-        self.set_engine(index, value, SET_RAW_ELT)
-    }
-}
+rvector!(f64, f64, REALSXP, REAL_ELT, SET_REAL_ELT);
+rvector!(i32, i32, INTSXP, INTEGER_ELT, SET_INTEGER_ELT);
+rvector!(u8, u8, RAWSXP, RAW_ELT, SET_RAW_ELT);
+rvector!(bool, i32, LGLSXP, LOGICAL_ELT, SET_LOGICAL_ELT);
 
 impl RObject<RVector, bool> {
     /// Get the value at a certain index in a logical RVector.
-    pub fn get(&self, index: usize) -> Result<bool, &'static str> {
+    pub fn get_bool(&self, index: usize) -> Result<bool, &'static str> {
         self.get_engine(index, LOGICAL_ELT).map(|x| x != 0)
     }
 
-    /// Get the value at a certain index in a logical RVector as an i32.
-    pub fn get_i32(&self, index: usize) -> Result<i32, &'static str> {
-        self.get_engine(index, LOGICAL_ELT)
-    }
-
     /// Set the value at a certain index in a logical RVector.
-    pub fn set(&mut self, index: usize, value: bool) -> Result<(), &'static str> {
+    pub fn set_bool(&mut self, index: usize, value: bool) -> Result<(), &'static str> {
         let value = if value {
-            Rboolean_TRUE as i32
-        } else {
-            Rboolean_FALSE as i32
-        };
-        self.set_engine(index, value, SET_LOGICAL_ELT)
-    }
-
-    /// Set the value at certain index in a logical RVector with an i32.
-    pub fn set_i32(&mut self, index: usize, value: i32) -> Result<(), &'static str> {
-        let value = if value != 0 {
             Rboolean_TRUE as i32
         } else {
             Rboolean_FALSE as i32
@@ -1518,6 +1484,10 @@ impl RObject<RVector, bool> {
 }
 
 impl RObject<RVector, RCharacter> {
+    pub fn new(length: usize, pc: &Pc) -> &mut Self {
+        Self::new_engine(STRSXP, length, pc)
+    }
+
     /// Get the value at a certain index in a character RVector.
     pub fn get<'a>(&self, index: usize) -> Result<&'a str, &'static str> {
         match self.get_engine(index, STRING_ELT) {
@@ -1588,6 +1558,12 @@ impl<RMode> RListMap<'_, RMode> {
             .map(|(name, _)| *name)
             .take(self.unused_counter);
         result.collect()
+    }
+}
+
+impl RObject<RList> {
+    pub fn new(length: usize, pc: &Pc) -> &mut Self {
+        pc.new_list(length)
     }
 }
 
@@ -1713,6 +1689,53 @@ impl RObject<RList, RDataFrame> {
 }
 
 impl<RMode> RObject<RMatrix, RMode> {
+    fn new_engine(code: u32, nrow: usize, ncol: usize, pc: &Pc) -> &mut Self {
+        let sexp = pc.protect(unsafe {
+            Rf_allocMatrix(
+                code,
+                nrow.try_into().stop_str(TOO_LONG),
+                ncol.try_into().stop_str(TOO_LONG),
+            )
+        });
+        pc.transmute_sexp_mut(sexp)
+    }
+
+    /// Returns the number of rows in the RMatrix.
+    pub fn nrow(&self) -> usize {
+        unsafe { Rf_nrows(self.sexp()).try_into().unwrap() }
+    }
+
+    /// Returns the number of columns in the RMatrix.
+    pub fn ncol(&self) -> usize {
+        unsafe { Rf_ncols(self.sexp()).try_into().unwrap() }
+    }
+
+    /// Returns the dimensions of the RMatrix.
+    pub fn dim(&self) -> [usize; 2] {
+        [self.nrow(), self.ncol()]
+    }
+
+    /// Transpose the matrix.
+    #[allow(clippy::mut_from_ref)]
+    pub fn transpose<'a>(&self, pc: &'a Pc) -> &'a mut RObject<RMatrix, RMode> {
+        let transposed = self.clone(pc);
+        let dim: &mut RObject<RVector, i32> = self
+            .get_attribute(Pc::symbol_dim())
+            .clone(pc)
+            .transmute_mut();
+        let slice = dim.slice_mut();
+        slice.swap(0, 1);
+        transposed.set_attribute(Pc::symbol_dim(), dim);
+        unsafe { Rf_copyMatrix(transposed.sexp(), self.sexp(), Rboolean_TRUE) };
+        transposed
+    }
+
+    /// Manipulates the matrix in place to be a vector by dropping the `dim` attribute.
+    pub fn as_vector<'a>(&mut self) -> &'a mut RObject<RVector, RMode> {
+        unsafe { Rf_setAttrib(self.sexp(), R_DimSymbol, R_NilValue) };
+        self.transmute_mut()
+    }
+
     /// Get the index of a value based on the row and column number.
     pub fn index(&self, (i, j): (usize, usize)) -> usize {
         let nrow = self.nrow();
@@ -1759,70 +1782,112 @@ impl<RMode> RObject<RMatrix, RMode> {
     }
 }
 
-impl RObject<RMatrix, f64> {
-    /// Get the value at a certain index in a double RMatrix.
-    pub fn get(&self, index: (usize, usize)) -> Result<f64, &'static str> {
-        self.transmute::<RVector, f64>().get(self.index(index))
-    }
+macro_rules! rmatrix {
+    ($tipe:ty, $tipe2:ty, $code:expr) => {
+        impl RObject<RMatrix, $tipe> {
+            pub fn new(nrow: usize, ncol: usize, pc: &Pc) -> &mut Self {
+                Self::new_engine($code, nrow, ncol, pc)
+            }
 
-    /// Set the value at a certain index in a double RMatrix.
-    pub fn set(&mut self, index: (usize, usize), value: f64) -> Result<(), &'static str> {
-        let index = self.index(index);
-        self.transmute_mut::<RVector, f64>().set(index, value)
-    }
+            pub fn from_value(value: $tipe2, nrow: usize, ncol: usize, pc: &Pc) -> &mut Self {
+                let result = Self::new(nrow, ncol, pc);
+                let slice = result.slice_mut();
+                slice.fill(value);
+                result
+            }
+
+            pub fn from_slice<'a>(
+                slice: &[$tipe2],
+                nrow: usize,
+                pc: &'a Pc,
+            ) -> Result<&'a mut Self, &'static str> {
+                if nrow == 0 && slice.len() == 0 {
+                    return Ok(Self::new(0, 0, pc));
+                }
+                let ncol = slice.len() / nrow;
+                if nrow * ncol != slice.len() {
+                    return Err("Slice length is not divisible by 'nrow'");
+                }
+                let result = Self::new(nrow, ncol, pc);
+                let slice2 = result.slice_mut();
+                slice2.copy_from_slice(slice);
+                Ok(result)
+            }
+
+            /// Get the value at a certain index in a double RMatrix.
+            pub fn get(&self, index: (usize, usize)) -> Result<$tipe2, &'static str> {
+                self.transmute::<RVector, $tipe>().get(self.index(index))
+            }
+
+            /// Set the value at a certain index in a double RMatrix.
+            pub fn set(
+                &mut self,
+                index: (usize, usize),
+                value: $tipe2,
+            ) -> Result<(), &'static str> {
+                let index = self.index(index);
+                self.transmute_mut::<RVector, $tipe>().set(index, value)
+            }
+        }
+    };
 }
 
-impl RObject<RMatrix, i32> {
-    /// Get the value at a certain index in an integer RMatrix.
-    pub fn get(&self, index: (usize, usize)) -> Result<i32, &'static str> {
-        self.transmute::<RVector, i32>().get(self.index(index))
-    }
-
-    /// Set the value at a certain index in an integer RMatrix.
-    pub fn set(&mut self, index: (usize, usize), value: i32) -> Result<(), &'static str> {
-        let index = self.index(index);
-        self.transmute_mut::<RVector, i32>().set(index, value)
-    }
-}
-
-impl RObject<RMatrix, u8> {
-    /// Get the value at a certain index in a raw RMatrix.
-    pub fn get(&self, index: (usize, usize)) -> Result<u8, &'static str> {
-        self.transmute::<RVector, u8>().get(self.index(index))
-    }
-
-    /// Set the value at a certain index in a raw RMatrix.
-    pub fn set(&mut self, index: (usize, usize), value: u8) -> Result<(), &'static str> {
-        let index = self.index(index);
-        self.transmute_mut::<RVector, u8>().set(index, value)
-    }
-}
+rmatrix!(f64, f64, REALSXP);
+rmatrix!(i32, i32, INTSXP);
+rmatrix!(u8, u8, RAWSXP);
+rmatrix!(bool, i32, LGLSXP);
 
 impl RObject<RMatrix, bool> {
-    /// Get the value at a certain index in a logical RMatrix.
-    pub fn get(&self, index: (usize, usize)) -> Result<bool, &'static str> {
-        self.transmute::<RVector, bool>().get(self.index(index))
-    }
-
     /// Get the value at a certain index in a logical RMatrix as an i32.
-    pub fn get_i32(&self, index: (usize, usize)) -> Result<i32, &'static str> {
-        self.transmute::<RVector, bool>().get_i32(self.index(index))
-    }
-
-    /// Set the value at a certain index in a logical RMatrix.
-    pub fn set(&mut self, index: (usize, usize), value: bool) -> Result<(), &'static str> {
-        let index = self.index(index);
-        self.transmute_mut::<RVector, bool>().set(index, value)
+    pub fn get_bool(&self, index: (usize, usize)) -> Result<bool, &'static str> {
+        self.transmute::<RVector, bool>()
+            .get_bool(self.index(index))
     }
 
     /// Set the value at a certain index in a logical RMatrix an an i32.
-    pub fn set_i32(&mut self, index: (usize, usize), value: i32) -> Result<(), &'static str> {
+    pub fn set_bool(&mut self, index: (usize, usize), value: bool) -> Result<(), &'static str> {
         let index = self.index(index);
-        self.transmute_mut::<RVector, bool>().set_i32(index, value)
+        self.transmute_mut::<RVector, bool>().set_bool(index, value)
     }
 }
 
 impl RObject<RMatrix, RCharacter> {
+    pub fn new(nrow: usize, ncol: usize, pc: &Pc) -> &mut Self {
+        Self::new_engine(STRSXP, nrow, ncol, pc)
+    }
+
+    pub fn from_value<'a>(value: &str, nrow: usize, ncol: usize, pc: &'a Pc) -> &'a mut Self {
+        let result = Self::new(nrow, ncol, pc);
+        let result2 = result.as_vector();
+        for i in 0..result2.len() {
+            let _ = result2.set(i, value);
+        }
+        result
+    }
+
+    /*
+        pub fn from_slice<'a>(
+            slice: &[&str],
+            nrow: usize,
+            pc: &'a Pc,
+        ) -> Result<&'a mut Self, &'static str> {
+            if nrow == 0 && slice.len() == 0 {
+                return Ok(Self::new(0, 0, pc));
+            }
+            let ncol = slice.len() / nrow;
+            if nrow * ncol != slice.len() {
+                return Err("Slice length is not divisible by 'nrow'");
+            }
+            let result = Self::new(nrow, ncol, pc);
+            for j in 0..ncol {
+                for i in 0..nrow {
+                    let _ = result.set((i, j), value);
+                }
+            }
+            Ok(result)
+        }
+    */
+
     /// Get the value at a certain index in a character RMatrix.
     pub fn get(&self, index: (usize, usize)) -> Result<&str, &'static str> {
         self.transmute::<RVector, RCharacter>()
@@ -1830,11 +1895,7 @@ impl RObject<RMatrix, RCharacter> {
     }
 
     /// Set the value at a certain index in a character RMatrix.
-    pub fn set<RType, RMode>(
-        &mut self,
-        index: (usize, usize),
-        value: &str,
-    ) -> Result<(), &'static str> {
+    pub fn set(&mut self, index: (usize, usize), value: &str) -> Result<(), &'static str> {
         let index = self.index(index);
         self.transmute_mut::<RVector, RCharacter>()
             .set(index, value)
@@ -1951,381 +2012,79 @@ pub trait FromR<RType, RMode, U> {
 
 /// Trait for converting objects to RObjects.
 ///
-/// The traits [ToR2], [ToR3], and [ToR4] are all identical to this trait.
-/// This was done to avoid conflicting trait implementations.
-pub trait ToR1<'a, RType, RMode> {
+pub trait ToR<'a, RType, RMode> {
     #[allow(clippy::mut_from_ref)]
     fn to_r(&self, pc: &'a Pc) -> &'a mut RObject<RType, RMode>;
 }
 
-/// Trait for converting objects to RObjects.
-///
-/// See [ToR1].
-pub trait ToR2<RType, RMode> {
-    #[allow(clippy::mut_from_ref)]
-    fn to_r(self, pc: &Pc) -> &mut RObject<RType, RMode>;
-}
-
-/// Trait for converting objects to RObjects.
-///
-/// See [ToR1].
-pub trait ToR3<RType, RMode> {
-    #[allow(clippy::mut_from_ref)]
-    fn to_r(self, pc: &Pc) -> &mut RObject<RType, RMode>;
-}
-
-/// Trait for converting objects to RObjects.
-///
-/// See [ToR1].
-pub trait ToR4<RType, RMode> {
-    #[allow(clippy::mut_from_ref)]
-    fn to_r(self, pc: &Pc) -> &mut RObject<RType, RMode>;
-}
-
-// f64
-
-impl<'a> ToR1<'a, RVector, f64> for f64 {
-    fn to_r(&self, pc: &'a Pc) -> &'a mut RObject<RVector, f64> {
-        pc.transmute_sexp_mut(pc.protect(unsafe { Rf_ScalarReal(*self) }))
-    }
-}
-
-impl<'a, const N: usize> ToR1<'a, RVector, f64> for [f64; N] {
-    fn to_r(&self, pc: &'a Pc) -> &'a mut RObject<RVector, f64> {
-        self.as_ref().to_r(pc)
-    }
-}
-
-impl<'a> ToR1<'a, RVector, f64> for &[f64] {
-    fn to_r(&self, pc: &'a Pc) -> &'a mut RObject<RVector, f64> {
-        let result = pc.new_vector_double(self.len());
-        let slice = result.slice_mut();
-        slice.copy_from_slice(self);
-        result
-    }
-}
-
-impl<'a> ToR1<'a, RVector, f64> for &mut [f64] {
-    fn to_r(&self, pc: &'a Pc) -> &'a mut RObject<RVector, f64> {
-        let result = pc.new_vector_double(self.len());
-        let slice = result.slice_mut();
-        slice.copy_from_slice(self);
-        result
-    }
-}
-
-impl<'a, T: IntoIterator<Item = &'a f64> + ExactSizeIterator> ToR2<RVector, f64> for T {
-    fn to_r(self, pc: &Pc) -> &mut RObject<RVector, f64> {
-        let result = pc.new_vector_double(self.len());
-        let slice = result.slice_mut();
-        for (to, from) in slice.iter_mut().zip(self) {
-            *to = *from;
+// scalars
+macro_rules! r_from_scalar {
+    ($tipe:ty, $tipe2:ty, $code:expr) => {
+        impl<'a> ToR<'a, RScalar, $tipe> for $tipe2 {
+            fn to_r(&self, pc: &'a Pc) -> &'a mut RObject<RScalar, $tipe> {
+                RObject::<RScalar, $tipe>::from_value($code(*self), pc)
+            }
         }
-        result
+    };
+}
+
+r_from_scalar!(f64, f64, |x| x);
+r_from_scalar!(i32, i32, |x| x);
+r_from_scalar!(u8, u8, |x| x);
+r_from_scalar!(bool, bool, |x: bool| if x {
+    Rboolean_TRUE as i32
+} else {
+    Rboolean_FALSE as i32
+});
+r_from_scalar!(i32, usize, |x: usize| x
+    .try_into()
+    .stop_str("Could not fit usize into i32"));
+
+impl<'a> ToR<'a, RScalar, RCharacter> for &str {
+    fn to_r(&self, pc: &'a Pc) -> &'a mut RObject<RScalar, RCharacter> {
+        RObject::<RScalar, RCharacter>::from_value(self, pc)
     }
 }
 
-impl<'a, T: IntoIterator<Item = &'a mut f64> + ExactSizeIterator> ToR3<RVector, f64> for T {
-    fn to_r(self, pc: &Pc) -> &mut RObject<RVector, f64> {
-        let result = pc.new_vector_double(self.len());
-        let slice = result.slice_mut();
-        for (to, from) in slice.iter_mut().zip(self) {
-            *to = *from;
+// slices
+macro_rules! r_from_slice {
+    ($tipe:ty) => {
+        impl<'a> ToR<'a, RVector, $tipe> for &[$tipe] {
+            fn to_r(&self, pc: &'a Pc) -> &'a mut RObject<RVector, $tipe> {
+                RObject::<RVector, $tipe>::from_slice(self, pc)
+            }
         }
-        result
-    }
+    };
 }
 
-impl<T: IntoIterator<Item = f64> + ExactSizeIterator> ToR4<RVector, f64> for T {
-    fn to_r(self, pc: &Pc) -> &mut RObject<RVector, f64> {
-        let result = pc.new_vector_double(self.len());
-        let slice = result.slice_mut();
-        for (to, from) in slice.iter_mut().zip(self) {
-            *to = from;
-        }
-        result
-    }
-}
+r_from_slice!(f64);
+r_from_slice!(i32);
+r_from_slice!(u8);
 
-// i32
-
-impl<'a> ToR1<'a, RVector, i32> for i32 {
-    fn to_r(&self, pc: &'a Pc) -> &'a mut RObject<RVector, i32> {
-        pc.transmute_sexp_mut(pc.protect(unsafe { Rf_ScalarInteger(*self) }))
-    }
-}
-
-impl<'a, const N: usize> ToR1<'a, RVector, i32> for [i32; N] {
-    fn to_r(&self, pc: &'a Pc) -> &'a mut RObject<RVector, i32> {
-        self.as_ref().to_r(pc)
-    }
-}
-
-impl<'a> ToR1<'a, RVector, i32> for &[i32] {
-    fn to_r(&self, pc: &'a Pc) -> &'a mut RObject<RVector, i32> {
-        let result = pc.new_vector_integer(self.len());
-        let slice = result.slice_mut();
-        slice.copy_from_slice(self);
-        result
-    }
-}
-
-impl<'a> ToR1<'a, RVector, i32> for &mut [i32] {
-    fn to_r(&self, pc: &'a Pc) -> &'a mut RObject<RVector, i32> {
-        let result = pc.new_vector_integer(self.len());
-        let slice = result.slice_mut();
-        slice.copy_from_slice(self);
-        result
-    }
-}
-
-impl<'a, T: IntoIterator<Item = &'a i32> + ExactSizeIterator> ToR2<RVector, i32> for T {
-    fn to_r(self, pc: &Pc) -> &mut RObject<RVector, i32> {
-        let result = pc.new_vector_integer(self.len());
-        let slice = result.slice_mut();
-        for (to, from) in slice.iter_mut().zip(self) {
-            *to = *from;
-        }
-        result
-    }
-}
-
-impl<'a, T: IntoIterator<Item = &'a mut i32> + ExactSizeIterator> ToR3<RVector, i32> for T {
-    fn to_r(self, pc: &Pc) -> &mut RObject<RVector, i32> {
-        let result = pc.new_vector_integer(self.len());
-        let slice = result.slice_mut();
-        for (to, from) in slice.iter_mut().zip(self) {
-            *to = *from;
-        }
-        result
-    }
-}
-
-impl<T: IntoIterator<Item = i32> + ExactSizeIterator> ToR4<RVector, i32> for T {
-    fn to_r(self, pc: &Pc) -> &mut RObject<RVector, i32> {
-        let result = pc.new_vector_integer(self.len());
-        let slice = result.slice_mut();
-        for (to, from) in slice.iter_mut().zip(self) {
-            *to = from;
-        }
-        result
-    }
-}
-
-// usize
-
-impl<'a> ToR1<'a, RVector, i32> for usize {
-    fn to_r(&self, pc: &'a Pc) -> &'a mut RObject<RVector, i32> {
-        pc.transmute_sexp_mut(pc.protect(unsafe {
-            Rf_ScalarInteger((*self).try_into().stop_str("Could not fit usize into i32"))
-        }))
-    }
-}
-
-impl<'a, const N: usize> ToR1<'a, RVector, i32> for [usize; N] {
-    fn to_r(&self, pc: &'a Pc) -> &'a mut RObject<RVector, i32> {
-        self.as_ref().to_r(pc)
-    }
-}
-
-impl<'a> ToR1<'a, RVector, i32> for &[usize] {
-    fn to_r(&self, pc: &'a Pc) -> &'a mut RObject<RVector, i32> {
-        let result = pc.new_vector_integer(self.len());
-        let slice = result.slice_mut();
-        for (i, j) in slice.iter_mut().zip(self.iter()) {
-            *i = (*j).try_into().stop_str("Could not fit usize into i32");
-        }
-        result
-    }
-}
-
-impl<'a> ToR1<'a, RVector, i32> for &mut [usize] {
-    fn to_r(&self, pc: &'a Pc) -> &'a mut RObject<RVector, i32> {
-        let result = pc.new_vector_integer(self.len());
-        let slice = result.slice_mut();
-        for (i, j) in slice.iter_mut().zip(self.iter()) {
-            *i = (*j).try_into().stop_str("Could not fit usize into i32");
-        }
-        result
-    }
-}
-
-// u8
-
-impl<'a> ToR1<'a, RVector, u8> for u8 {
-    fn to_r(&self, pc: &'a Pc) -> &'a mut RObject<RVector, u8> {
-        pc.transmute_sexp_mut(pc.protect(unsafe { Rf_ScalarRaw(*self) }))
-    }
-}
-
-impl<'a, const N: usize> ToR1<'a, RVector, u8> for [u8; N] {
-    fn to_r(&self, pc: &'a Pc) -> &'a mut RObject<RVector, u8> {
-        self.as_ref().to_r(pc)
-    }
-}
-
-impl<'a> ToR1<'a, RVector, u8> for &[u8] {
-    fn to_r(&self, pc: &'a Pc) -> &'a mut RObject<RVector, u8> {
-        let result = pc.new_vector_raw(self.len());
-        let slice = result.slice_mut();
-        slice.copy_from_slice(self);
-        result
-    }
-}
-
-impl<'a> ToR1<'a, RVector, u8> for &mut [u8] {
-    fn to_r(&self, pc: &'a Pc) -> &'a mut RObject<RVector, u8> {
-        let result = pc.new_vector_raw(self.len());
-        let slice = result.slice_mut();
-        slice.copy_from_slice(self);
-        result
-    }
-}
-
-impl<'a, T: IntoIterator<Item = &'a u8> + ExactSizeIterator> ToR2<RVector, u8> for T {
-    fn to_r(self, pc: &Pc) -> &mut RObject<RVector, u8> {
-        let result = pc.new_vector_raw(self.len());
-        let slice = result.slice_mut();
-        for (to, from) in slice.iter_mut().zip(self) {
-            *to = *from;
-        }
-        result
-    }
-}
-
-impl<'a, T: IntoIterator<Item = &'a mut u8> + ExactSizeIterator> ToR3<RVector, u8> for T {
-    fn to_r(self, pc: &Pc) -> &mut RObject<RVector, u8> {
-        let result = pc.new_vector_raw(self.len());
-        let slice = result.slice_mut();
-        for (to, from) in slice.iter_mut().zip(self) {
-            *to = *from;
-        }
-        result
-    }
-}
-
-impl<T: IntoIterator<Item = u8> + ExactSizeIterator> ToR4<RVector, u8> for T {
-    fn to_r(self, pc: &Pc) -> &mut RObject<RVector, u8> {
-        let result = pc.new_vector_raw(self.len());
-        let slice = result.slice_mut();
-        for (to, from) in slice.iter_mut().zip(self) {
-            *to = from;
-        }
-        result
-    }
-}
-
-// bool
-
-impl<'a> ToR1<'a, RVector, bool> for bool {
+impl<'a> ToR<'a, RVector, bool> for &[bool] {
     fn to_r(&self, pc: &'a Pc) -> &'a mut RObject<RVector, bool> {
-        pc.transmute_sexp_mut(pc.protect(unsafe {
-            Rf_ScalarLogical(if *self {
-                Rboolean_TRUE as i32
-            } else {
-                Rboolean_FALSE as i32
-            })
-        }))
+        RObject::<RVector, bool>::from_iter(
+            self.iter().map(|x| {
+                if *x {
+                    Rboolean_TRUE as i32
+                } else {
+                    Rboolean_FALSE as i32
+                }
+            }),
+            pc,
+        )
     }
 }
 
-impl<'a, const N: usize> ToR1<'a, RVector, bool> for [bool; N] {
-    fn to_r(&self, pc: &'a Pc) -> &'a mut RObject<RVector, bool> {
-        self.as_ref().to_r(pc)
+impl<'a> ToR<'a, RVector, i32> for &[usize] {
+    fn to_r(&self, pc: &'a Pc) -> &'a mut RObject<RVector, i32> {
+        RObject::<RVector, i32>::from_iter(self.iter().map(|x| (*x).try_into().unwrap()), pc)
     }
 }
 
-impl<'a> ToR1<'a, RVector, bool> for &[bool] {
-    fn to_r(&self, pc: &'a Pc) -> &'a mut RObject<RVector, bool> {
-        let result = pc.new_vector_logical(self.len());
-        let slice = result.slice_mut();
-        for (i, j) in slice.iter_mut().zip(self.iter()) {
-            *i = (*j).into();
-        }
-        result
-    }
-}
-
-impl<'a> ToR1<'a, RVector, bool> for &mut [bool] {
-    fn to_r(&self, pc: &'a Pc) -> &'a mut RObject<RVector, bool> {
-        let result = pc.new_vector_logical(self.len());
-        let slice = result.slice_mut();
-        for (i, j) in slice.iter_mut().zip(self.iter()) {
-            *i = (*j).into();
-        }
-        result
-    }
-}
-
-impl<'a, T: IntoIterator<Item = &'a bool> + ExactSizeIterator> ToR2<RVector, bool> for T {
-    fn to_r(self, pc: &Pc) -> &mut RObject<RVector, bool> {
-        let result = pc.new_vector_logical(self.len());
-        let slice = result.slice_mut();
-        for (to, from) in slice.iter_mut().zip(self) {
-            *to = if *from {
-                Rboolean_TRUE as i32
-            } else {
-                Rboolean_FALSE as i32
-            };
-        }
-        result
-    }
-}
-
-impl<'a, T: IntoIterator<Item = &'a mut bool> + ExactSizeIterator> ToR3<RVector, bool> for T {
-    fn to_r(self, pc: &Pc) -> &mut RObject<RVector, bool> {
-        let result = pc.new_vector_logical(self.len());
-        let slice = result.slice_mut();
-        for (to, from) in slice.iter_mut().zip(self) {
-            *to = if *from {
-                Rboolean_TRUE as i32
-            } else {
-                Rboolean_FALSE as i32
-            };
-        }
-        result
-    }
-}
-
-impl<T: IntoIterator<Item = bool> + ExactSizeIterator> ToR4<RVector, bool> for T {
-    fn to_r(self, pc: &Pc) -> &mut RObject<RVector, bool> {
-        let result = pc.new_vector_logical(self.len());
-        let slice = result.slice_mut();
-        for (to, from) in slice.iter_mut().zip(self) {
-            *to = if from {
-                Rboolean_TRUE as i32
-            } else {
-                Rboolean_FALSE as i32
-            };
-        }
-        result
-    }
-}
-
-// &str
-
-impl<'a> ToR1<'a, RVector, RCharacter> for &str {
+impl<'a> ToR<'a, RVector, RCharacter> for &[&str] {
     fn to_r(&self, pc: &'a Pc) -> &'a mut RObject<RVector, RCharacter> {
-        let sexp = unsafe {
-            Rf_ScalarString(Rf_mkCharLenCE(
-                self.as_ptr() as *const c_char,
-                self.len().try_into().stop_str(TOO_LONG),
-                cetype_t_CE_UTF8,
-            ))
-        };
-        pc.transmute_sexp_mut(pc.protect(sexp))
-    }
-}
-
-impl<'a, const N: usize> ToR1<'a, RVector, RCharacter> for [&str; N] {
-    fn to_r(&self, pc: &'a Pc) -> &'a mut RObject<RVector, RCharacter> {
-        self.as_ref().to_r(pc)
-    }
-}
-
-impl<'a> ToR1<'a, RVector, RCharacter> for &[&str] {
-    fn to_r(&self, pc: &'a Pc) -> &'a mut RObject<RVector, RCharacter> {
-        let result = pc.new_vector_character(self.len());
+        let result = RObject::<RVector, RCharacter>::new(self.len(), pc);
         for (index, s) in self.iter().enumerate() {
             let _ = result.set(index, s);
         }
@@ -2333,31 +2092,38 @@ impl<'a> ToR1<'a, RVector, RCharacter> for &[&str] {
     }
 }
 
-impl<'a> ToR1<'a, RVector, RCharacter> for &mut [&str] {
-    fn to_r(&self, pc: &'a Pc) -> &'a mut RObject<RVector, RCharacter> {
-        let result = pc.new_vector_character(self.len());
-        for (index, s) in self.iter().enumerate() {
-            let _ = result.set(index, s);
+// arrays
+macro_rules! r_from_array {
+    ($tipe:ty, $tipe2:ty) => {
+        impl<'a, const N: usize> ToR<'a, RVector, $tipe> for [$tipe2; N] {
+            fn to_r(&self, pc: &'a Pc) -> &'a mut RObject<RVector, $tipe> {
+                self.as_ref().to_r(pc)
+            }
         }
-        result
-    }
+    };
 }
+
+r_from_array!(f64, f64);
+r_from_array!(i32, i32);
+r_from_array!(u8, u8);
+r_from_array!(i32, usize);
+r_from_array!(RCharacter, &str);
 
 // &RObject and SEXP
 
-impl<'a, RType, RMode> ToR1<'a, RAnyType, RUnknown> for RObject<RType, RMode> {
+impl<'a, RType, RMode> ToR<'a, RAnyType, RUnknown> for RObject<RType, RMode> {
     fn to_r(&self, pc: &'a Pc) -> &'a mut RObject {
         pc.transmute_sexp_mut(self.sexp())
     }
 }
 
-impl<'a> ToR1<'a, RAnyType, RUnknown> for SEXP {
+impl<'a> ToR<'a, RAnyType, RUnknown> for SEXP {
     fn to_r(&self, pc: &'a Pc) -> &'a mut RObject<RAnyType, RUnknown> {
         pc.transmute_sexp_mut(*self)
     }
 }
 
-impl<'a> ToR1<'a, RAnyType, RUnknown> for () {
+impl<'a> ToR<'a, RAnyType, RUnknown> for () {
     fn to_r(&self, pc: &'a Pc) -> &'a mut RObject<RAnyType, RUnknown> {
         pc.transmute_sexp_mut(unsafe { R_NilValue })
     }

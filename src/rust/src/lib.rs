@@ -6,7 +6,7 @@ use roxido::*;
 
 #[roxido]
 fn convolve2(a: &RObject<RVector>, b: &RObject<RVector>) {
-    let r = pc.new_vector_double(a.len() + b.len() - 1);
+    let r = RObject::<RVector, f64>::new(a.len() + b.len() - 1, pc);
     let ab = r.slice_mut();
     for abi in ab.iter_mut() {
         *abi = 0.0;
@@ -24,9 +24,9 @@ fn zero(f: &RObject<RFunction>, guess1: f64, guess2: f64, tol: f64) {
     if !tol.is_finite() || tol <= 0.0 {
         stop!("'tol' must be a strictly positive value.");
     }
-    let x_rval = pc.new_vector_double(1);
+    let x_rval = 0.0.to_r(pc);
     let mut g = |x: f64| {
-        let _ = x_rval.set(0, x);
+        x_rval.set(x);
         let Ok(fx) = f.call1(x_rval, pc) else {
             stop!("Error in function evaluation.");
         };
