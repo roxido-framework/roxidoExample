@@ -633,7 +633,7 @@ impl<RType: RAtomic + RHasLength, RMode> RObject<RType, RMode> {
     }
 
     /// Check if appropriate to characterize storage mode as "double".
-    pub fn f64(&self) -> Result<&RObject<RType, f64>, &'static str> {
+    pub fn as_f64(&self) -> Result<&RObject<RType, f64>, &'static str> {
         if self.is_f64() {
             Ok(self.transmute())
         } else {
@@ -642,7 +642,7 @@ impl<RType: RAtomic + RHasLength, RMode> RObject<RType, RMode> {
     }
 
     /// Check if appropriate to characterize storage mode as "double".
-    pub fn f64_mut(&mut self) -> Result<&mut RObject<RType, f64>, &'static str> {
+    pub fn as_f64_mut(&mut self) -> Result<&mut RObject<RType, f64>, &'static str> {
         if self.is_f64() {
             Ok(self.transmute_mut())
         } else {
@@ -676,7 +676,7 @@ impl<RType: RAtomic + RHasLength, RMode> RObject<RType, RMode> {
     }
 
     /// Check if appropriate to characterize storage mode as "double".
-    pub fn i32(&self) -> Result<&RObject<RType, i32>, &'static str> {
+    pub fn as_i32(&self) -> Result<&RObject<RType, i32>, &'static str> {
         if self.is_i32() {
             Ok(self.transmute())
         } else {
@@ -685,7 +685,7 @@ impl<RType: RAtomic + RHasLength, RMode> RObject<RType, RMode> {
     }
 
     /// Check if appropriate to characterize storage mode as "double".
-    pub fn i32_mut(&mut self) -> Result<&mut RObject<RType, i32>, &'static str> {
+    pub fn as_i32_mut(&mut self) -> Result<&mut RObject<RType, i32>, &'static str> {
         if self.is_i32() {
             Ok(self.transmute_mut())
         } else {
@@ -719,7 +719,7 @@ impl<RType: RAtomic + RHasLength, RMode> RObject<RType, RMode> {
     }
 
     /// Check if appropriate to characterize storage mode as "double".
-    pub fn u8(&self) -> Result<&RObject<RType, u8>, &'static str> {
+    pub fn as_u8(&self) -> Result<&RObject<RType, u8>, &'static str> {
         if self.is_u8() {
             Ok(self.transmute())
         } else {
@@ -728,7 +728,7 @@ impl<RType: RAtomic + RHasLength, RMode> RObject<RType, RMode> {
     }
 
     /// Check if appropriate to characterize storage mode as "double".
-    pub fn u8_mut(&mut self) -> Result<&mut RObject<RType, u8>, &'static str> {
+    pub fn as_u8_mut(&mut self) -> Result<&mut RObject<RType, u8>, &'static str> {
         if self.is_u8() {
             Ok(self.transmute_mut())
         } else {
@@ -762,7 +762,7 @@ impl<RType: RAtomic + RHasLength, RMode> RObject<RType, RMode> {
     }
 
     /// Check if appropriate to characterize storage mode as "double".
-    pub fn bool(&self) -> Result<&RObject<RType, bool>, &'static str> {
+    pub fn as_bool(&self) -> Result<&RObject<RType, bool>, &'static str> {
         if self.is_bool() {
             Ok(self.transmute())
         } else {
@@ -771,7 +771,7 @@ impl<RType: RAtomic + RHasLength, RMode> RObject<RType, RMode> {
     }
 
     /// Check if appropriate to characterize storage mode as "double".
-    pub fn bool_mut(&mut self) -> Result<&mut RObject<RType, bool>, &'static str> {
+    pub fn as_bool_mut(&mut self) -> Result<&mut RObject<RType, bool>, &'static str> {
         if self.is_bool() {
             Ok(self.transmute_mut())
         } else {
@@ -1015,12 +1015,12 @@ impl RObject<RFunction> {
 
 impl<RMode> RObject<RScalar, RMode> {
     /// Check if appropriate to characterize as an f64.
-    pub fn as_f64(&self) -> f64 {
+    pub fn f64(&self) -> f64 {
         unsafe { Rf_asReal(self.sexp()) }
     }
 
     /// Check if appropriate to characterize as an i32.
-    pub fn as_i32(&self) -> Result<i32, &'static str> {
+    pub fn i32(&self) -> Result<i32, &'static str> {
         if self.is_i32() {
             let x = unsafe { Rf_asInteger(self.sexp()) };
             if x == i32::MIN {
@@ -1056,7 +1056,7 @@ impl<RMode> RObject<RScalar, RMode> {
     }
 
     /// Check if appropriate to characterize as a usize.
-    pub fn as_usize(&self) -> Result<usize, &'static str> {
+    pub fn usize(&self) -> Result<usize, &'static str> {
         if self.is_i32() {
             let x = unsafe { Rf_asInteger(self.sexp()) };
             if x == i32::MIN {
@@ -1094,7 +1094,7 @@ impl<RMode> RObject<RScalar, RMode> {
     }
 
     /// Check if appropriate to characterize as a u8.
-    pub fn as_u8(&self) -> Result<u8, &'static str> {
+    pub fn u8(&self) -> Result<u8, &'static str> {
         if self.is_i32() {
             let x = unsafe { Rf_asInteger(self.sexp()) };
             u8::try_from(x).map_err(|_| "Cannot convert to u8")
@@ -1126,7 +1126,7 @@ impl<RMode> RObject<RScalar, RMode> {
     }
 
     /// Check if appropriate to characterize as a bool.
-    pub fn as_bool(&self) -> Result<bool, &'static str> {
+    pub fn bool(&self) -> Result<bool, &'static str> {
         if self.is_i32() {
             let x = unsafe { Rf_asInteger(self.sexp()) };
             if x == i32::MIN {
@@ -1158,7 +1158,7 @@ impl<RMode> RObject<RScalar, RMode> {
     }
 
     /// Check if appropriate to characterize as a str reference.
-    pub fn as_str<'a>(&self, pc: &'a Pc) -> &'a str {
+    pub fn str<'a>(&self, pc: &'a Pc) -> &'a str {
         let s: &RObject<RVector, RCharacter> = self.to_character(pc).transmute();
         s.get(0).unwrap()
     }

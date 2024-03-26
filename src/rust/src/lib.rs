@@ -30,7 +30,7 @@ fn zero(f: &RObject<RFunction>, guess1: f64, guess2: f64, tol: f64) {
         let fx = fx
             .scalar()
             .stop_str("Unexpected return value from function.")
-            .as_f64();
+            .f64();
         if !fx.is_finite() {
             stop!("Non-finite return value from function.");
         }
