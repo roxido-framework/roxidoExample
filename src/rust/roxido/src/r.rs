@@ -303,7 +303,7 @@ impl<RType, RMode> RObject<RType, RMode> {
         }
     }
 
-    /// Check if appropriate to characterize as an RObject<RMatrix>.
+    /// Check if appropriate to characterize as an `RObject<RMatrix>`.
     /// Checks using R's `Rf_isMatrix` function.
     pub fn matrix(&self) -> Result<&RObject<RMatrix>, &'static str> {
         if self.is_matrix() {
@@ -313,7 +313,7 @@ impl<RType, RMode> RObject<RType, RMode> {
         }
     }
 
-    /// Check if appropriate to characterize as an RObject<RMatrix>.
+    /// Check if appropriate to characterize as an `RObject<RMatrix>`.
     /// Checks using R's `Rf_isMatrix` function.
     pub fn matrix_mut(&mut self) -> Result<&mut RObject<RMatrix>, &'static str> {
         if self.is_matrix() {
@@ -323,7 +323,7 @@ impl<RType, RMode> RObject<RType, RMode> {
         }
     }
 
-    /// Check if appropriate to characterize as an RObject<RArray>.
+    /// Check if appropriate to characterize as an `RObject<RArray>`.
     /// Checks using R's `Rf_isArray` function.
     pub fn array(&self) -> Result<&RObject<RArray>, &'static str> {
         if self.is_array() {
@@ -333,7 +333,7 @@ impl<RType, RMode> RObject<RType, RMode> {
         }
     }
 
-    /// Check if appropriate to characterize as an RObject<RArray>.
+    /// Check if appropriate to characterize as an `RObject<RArray>`.
     /// Checks using R's `Rf_isArray` function.
     pub fn array_mut(&mut self) -> Result<&mut RObject<RArray>, &'static str> {
         if self.is_array() {
@@ -343,7 +343,7 @@ impl<RType, RMode> RObject<RType, RMode> {
         }
     }
 
-    /// Check if appropriate to characterize as an RObject<RVector, RList>.
+    /// Check if appropriate to characterize as an `RObject<RVector, RList>`.
     /// Checks using R's `Rf_isVectorList` function.
     pub fn list(&self) -> Result<&RObject<RList>, &'static str> {
         if self.is_list() {
@@ -353,7 +353,7 @@ impl<RType, RMode> RObject<RType, RMode> {
         }
     }
 
-    /// Check if appropriate to characterize as an RObject<RVector, RList>.
+    /// Check if appropriate to characterize as an `RObject<RVector, RList>`.
     /// Checks using R's `Rf_isVectorList` function.
     pub fn list_mut(&mut self) -> Result<&mut RObject<RList>, &'static str> {
         if self.is_list() {
@@ -363,7 +363,7 @@ impl<RType, RMode> RObject<RType, RMode> {
         }
     }
 
-    /// Check if appropriate to characterize as an RObject<RVector, RDataFrame>.
+    /// Check if appropriate to characterize as an `RObject<RVector, RDataFrame>`.
     /// Checks using R's `Rf_isFrame` function.
     pub fn data_frame(&self) -> Result<&RObject<RList, RDataFrame>, &'static str> {
         if self.is_data_frame() {
@@ -373,7 +373,7 @@ impl<RType, RMode> RObject<RType, RMode> {
         }
     }
 
-    /// Check if appropriate to characterize as an RObject<RVector, RDataFrame>.
+    /// Check if appropriate to characterize as an `RObject<RVector, RDataFrame>`.
     /// Checks using R's `Rf_isFrame` function.
     pub fn data_frame_mut(&mut self) -> Result<&mut RObject<RList, RDataFrame>, &'static str> {
         if self.is_data_frame() {
@@ -383,7 +383,7 @@ impl<RType, RMode> RObject<RType, RMode> {
         }
     }
 
-    /// Check if appropriate to characterize as an RObject<RFunction>.
+    /// Check if appropriate to characterize as an `RObject<RFunction>`.
     /// Checks using R's `Rf_isFunction` function.
     pub fn function(&self) -> Result<&RObject<RFunction>, &'static str> {
         if self.is_function() {
@@ -393,7 +393,7 @@ impl<RType, RMode> RObject<RType, RMode> {
         }
     }
 
-    /// Check if appropriate to characterize as an RObject<RFunction>.
+    /// Check if appropriate to characterize as an `RObject<RFunction>`.
     /// Checks using R's `Rf_isFunction` function.
     pub fn function_mut(&mut self) -> Result<&mut RObject<RFunction>, &'static str> {
         if self.is_function() {
@@ -403,7 +403,7 @@ impl<RType, RMode> RObject<RType, RMode> {
         }
     }
 
-    /// Check if appropriate to characterize as an RObject<RExternalPtr>.
+    /// Check if appropriate to characterize as an `RObject<RExternalPtr>`.
     /// Uses the SEXP type to determine if this is possible.
     pub fn external_ptr(&self) -> Result<&RObject<RExternalPtr>, &'static str> {
         if self.is_external_ptr() {
@@ -413,7 +413,7 @@ impl<RType, RMode> RObject<RType, RMode> {
         }
     }
 
-    /// Check if appropriate to characterize as an RObject<RExternalPtr>.
+    /// Check if appropriate to characterize as an `RObject<RExternalPtr>`.
     /// Uses the SEXP type to determine if this is possible.
     pub fn external_ptr_mut(&mut self) -> Result<&mut RObject<RExternalPtr>, &'static str> {
         if self.is_external_ptr() {
@@ -423,7 +423,7 @@ impl<RType, RMode> RObject<RType, RMode> {
         }
     }
 
-    /// Check if appropriate to characterize as an RObject<RExternalPtr>.
+    /// Check if appropriate to characterize as an `RObject<RSymbol>`.
     /// Uses the SEXP type to determine if this is possible.
     pub fn symbol(&self) -> Result<&RObject<RSymbol>, &'static str> {
         if self.is_symbol() {
@@ -433,7 +433,7 @@ impl<RType, RMode> RObject<RType, RMode> {
         }
     }
 
-    /// Check if appropriate to characterize as an RObject<RExternalPtr>.
+    /// Check if appropriate to characterize as an `RObject<RSymbol>`.
     /// Uses the SEXP type to determine if this is possible.
     pub fn symbol_mut(&mut self) -> Result<&mut RObject<RSymbol>, &'static str> {
         if self.is_symbol() {
@@ -1828,7 +1828,7 @@ impl RObject<RExternalPtr> {
 
     /// Move an R external pointer to a Rust object.
     ///
-    /// This method moves an R external pointer created by [`Self::as_external_ptr`] to a Rust object and Rust will then manage its memory.
+    /// This method moves an R external pointer created by [`RObject::external_ptr`] to a Rust object and Rust will then manage its memory.
     ///
     pub fn decode_val<T>(&self) -> Result<T, &'static str> {
         if self.is_managed_by_r() {
@@ -1846,7 +1846,7 @@ impl RObject<RExternalPtr> {
 
     /// Obtain a reference to a Rust object from an R external pointer.
     ///
-    /// This method obtains a reference to a Rust object from an R external pointer created by [`Self::as_external_ptr`].
+    /// This method obtains a reference to a Rust object from an R external pointer created by [`RObject::external_ptr`].
     ///
     pub fn decode_ref<T>(&self) -> &T {
         unsafe {
@@ -1857,7 +1857,7 @@ impl RObject<RExternalPtr> {
 
     /// Obtain a reference to a Rust object from an R external pointer, pretending a static lifetime.
     ///
-    /// This method obtains a reference to a Rust object from an R external pointer created by [`Self::as_external_ptr`].
+    /// This method obtains a reference to a Rust object from an R external pointer created by [`RObject::external_ptr`].
     ///
     /// # Safety
     ///
@@ -1870,7 +1870,7 @@ impl RObject<RExternalPtr> {
 
     /// Obtain a mutable reference to a Rust object from an R external pointer.
     ///
-    /// This method obtains a mutable reference to a Rust object from an R external pointer created by [`Self::as_external_ptr`].
+    /// This method obtains a mutable reference to a Rust object from an R external pointer created by [`RObject::external_ptr`].
     ///
     pub fn decode_mut<'a, T>(&mut self) -> &'a mut T {
         unsafe {
@@ -1881,7 +1881,7 @@ impl RObject<RExternalPtr> {
 
     /// Obtain a mutable reference to a Rust object from an R external pointer, pretending a static lifetime.
     ///
-    /// This method obtains a mutable reference to a Rust object from an R external pointer created by [`Self::external_ptr`].
+    /// This method obtains a mutable reference to a Rust object from an R external pointer created by [`RObject::external_ptr`].
     ///
     /// # Safety
     ///
@@ -2025,6 +2025,7 @@ macro_rules! r_from_array {
 r_from_array!(f64, f64);
 r_from_array!(i32, i32);
 r_from_array!(u8, u8);
+r_from_array!(bool, bool);
 r_from_array!(i32, usize);
 r_from_array!(RCharacter, &str);
 
