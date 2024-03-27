@@ -462,9 +462,10 @@ fn roxido_fn(options: Vec<NestedMeta>, item_fn: syn::ItemFn) -> TokenStream {
                         let len = msg.len();
                         let sexp = unsafe {
                             use std::convert::TryInto;
-                            Rf_mkCharLen(
+                            Rf_mkCharLenCE(
                                 msg.as_ptr() as *const std::os::raw::c_char,
                                 msg.len().try_into().unwrap(),
+                                cetype_t_CE_UTF8,
                             )
                         };
                         drop(result);
