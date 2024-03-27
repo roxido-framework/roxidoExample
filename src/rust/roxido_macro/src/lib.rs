@@ -120,7 +120,7 @@ fn roxido_fn(options: Vec<NestedMeta>, item_fn: syn::ItemFn) -> TokenStream {
             syn::FnArg::Typed(pat_type) => {
                 {
                     let mut y = pat_type.clone();
-                    y.ty = Box::new(syn::parse_str::<syn::Type>("crate::rbindings::SEXP").unwrap());
+                    y.ty = Box::new(syn::parse_str::<syn::Type>("SEXP").unwrap());
                     new_args.push(syn::FnArg::Typed(y));
                 }
                 let name = &pat_type.pat;
@@ -442,7 +442,7 @@ fn roxido_fn(options: Vec<NestedMeta>, item_fn: syn::ItemFn) -> TokenStream {
         TokenStream::from(quote! {
             #[allow(clippy::useless_transmute)]
             #[no_mangle]
-            extern "C" fn #name(#new_args) -> crate::rbindings::SEXP {
+            extern "C" fn #name(#new_args) -> SEXP {
                 let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                     let pc = &mut Pc::new();
                     #( #generated_statements )*
@@ -452,7 +452,8 @@ fn roxido_fn(options: Vec<NestedMeta>, item_fn: syn::ItemFn) -> TokenStream {
                 match result {
                     Ok(obj) => obj,
                     Err(ref payload) => {
-                        let msg = match payload.downcast_ref::<crate::stop::RStopHelper>() {
+                        use crate::rbindings::*;
+                        let msg = match payload.downcast_ref::<RStopHelper>() {
                             Some(x) => x.0.as_str(),
                             None => {
                                 concat!("Panic in Rust function '", stringify!(#name),"' with 'roxido' attribute")
@@ -461,16 +462,16 @@ fn roxido_fn(options: Vec<NestedMeta>, item_fn: syn::ItemFn) -> TokenStream {
                         let len = msg.len();
                         let sexp = unsafe {
                             use std::convert::TryInto;
-                            crate::rbindings::Rf_mkCharLen(
+                            Rf_mkCharLen(
                                 msg.as_ptr() as *const std::os::raw::c_char,
                                 msg.len().try_into().unwrap(),
                             )
                         };
                         drop(result);
                         unsafe {
-                            crate::rbindings::Rf_error(b"%.*s\0".as_ptr() as *const std::os::raw::c_char, len, crate::rbindings::R_CHAR(sexp));
+                            Rf_error(b"%.*s\0".as_ptr() as *const std::os::raw::c_char, len, R_CHAR(sexp));
                         }
-                        crate::R::null().sexp()  // We never get here.
+                        R::null().sexp()  // We never get here.
                     }
                 }
             }
@@ -479,8 +480,8 @@ fn roxido_fn(options: Vec<NestedMeta>, item_fn: syn::ItemFn) -> TokenStream {
         TokenStream::from(quote! {
             #[allow(clippy::useless_transmute)]
             #[no_mangle]
-            extern "C" fn #name(#new_args) -> crate::rbindings::SEXP {
-                let result: Result<crate::rbindings::SEXP, _> = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            extern "C" fn #name(#new_args) -> SEXP {
+                let result: Result<SEXP, _> = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                     let pc = &mut Pc::new();
                     #( #generated_statements )*
                     let mut f = || { #body };
@@ -489,7 +490,7 @@ fn roxido_fn(options: Vec<NestedMeta>, item_fn: syn::ItemFn) -> TokenStream {
                 match result {
                     Ok(obj) => obj,
                     Err(_) => {
-                        let pc = &mut crate::Pc::new();
+                        let pc = &mut Pc::new();
                         pc.new_error(concat!("Panic in Rust function '",stringify!(#name),"' with 'roxido' attribute")).sexp()
                     }
                 }

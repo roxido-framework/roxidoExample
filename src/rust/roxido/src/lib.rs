@@ -51,7 +51,8 @@ pub use roxido_macro::roxido;
 /// A procedural macro to facilitate printing from Rust to R.
 pub use print::*;
 
+pub use r::*;
+pub use rbindings::SEXP;
+
 #[doc(hidden)]
 pub use stop::*;
-
-pub use r::*;
