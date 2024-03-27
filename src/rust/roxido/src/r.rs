@@ -555,10 +555,9 @@ impl RObject<RError> {
     /// This does *not* throw an error.  To throw an R error, simply use `stop!`.
     ///
     pub fn new<'a>(message: &str, pc: &'a Pc) -> &'a mut Self {
-        let list = RObject::<RList>::new(2, pc);
+        let list = RObject::<RList>::with_names(["message", "calls"], pc);
         let _ = list.set(0, message.to_r(pc));
         let _ = list.set(1, R::null());
-        let _ = list.set_names(["message", "calls"].to_r(pc));
         list.set_class(["error", "condition"].to_r(pc));
         list.transmute_mut()
     }
@@ -1440,6 +1439,12 @@ impl RObject<RList> {
             pc.protect(unsafe { Rf_allocVector(VECSXP, length.try_into().stop_str(TOO_LONG)) });
         pc.transmute_sexp_mut(sexp)
     }
+
+    pub fn with_names<'a, const N: usize>(names: [&str; N], pc: &'a Pc) -> &'a mut Self {
+        let result = Self::new(names.len(), pc);
+        let _ = result.set_names(names.to_r(pc));
+        result
+    }
 }
 
 impl<RMode> RObject<RList, RMode> {
@@ -2010,6 +2015,24 @@ impl<'a> ToR<'a, RVector, RCharacter> for &[&str] {
         result
     }
 }
+
+// vectors
+macro_rules! r_from_vector {
+    ($tipe:ty, $tipe2:ty) => {
+        impl<'a> ToR<'a, RVector, $tipe> for Vec<$tipe2> {
+            fn to_r(&self, pc: &'a Pc) -> &'a mut RObject<RVector, $tipe> {
+                (&self[..]).to_r(pc)
+            }
+        }
+    };
+}
+
+r_from_vector!(f64, f64);
+r_from_vector!(i32, i32);
+r_from_vector!(u8, u8);
+r_from_vector!(bool, bool);
+r_from_vector!(i32, usize);
+r_from_vector!(RCharacter, &str);
 
 // arrays
 macro_rules! r_from_array {

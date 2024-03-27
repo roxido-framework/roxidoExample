@@ -165,7 +165,7 @@ fn roxido_fn(options: Vec<NestedMeta>, item_fn: syn::ItemFn) -> TokenStream {
                                 let path = quote!(#ty).to_string();
                                 if !path.starts_with("RObject") {
                                     if path == "str" {
-                                        generated_statements.push(parse_quote! { let #name = pc.transmute_sexp::<RAnyType, RUnknown>(#name).scalar().stop_str(concat!("'", stringify!(#name),"' is expected to be a scalar")).str(pc).map_err(|x| format!(concat!("'", stringify!(#name), "' cannot be a string: {}"), x)).stop(); });
+                                        generated_statements.push(parse_quote! { let #name = pc.transmute_sexp::<RAnyType, RUnknown>(#name).scalar().stop_str(concat!("'", stringify!(#name),"' is expected to be a scalar")).str(pc); });
                                     } else {
                                         error_msg();
                                     }
