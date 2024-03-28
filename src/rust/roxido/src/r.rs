@@ -1551,11 +1551,7 @@ macro_rules! rmatrix {
                 Ok(result)
             }
 
-            pub fn from_iter<'a, T>(
-                iter: T,
-                nrow: usize,
-                pc: &'a Pc,
-            ) -> Result<&'a mut Self, &'static str>
+            pub fn from_iter<T>(iter: T, nrow: usize, pc: &Pc) -> Result<&mut Self, &'static str>
             where
                 T: Iterator<Item = $tipe2> + ExactSizeIterator,
             {
