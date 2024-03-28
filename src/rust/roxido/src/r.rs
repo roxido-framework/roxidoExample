@@ -157,12 +157,12 @@ impl R {
     }
 
     /// Returns an R Inf value.
-    pub fn infinity_positive() -> f64 {
+    pub fn positive_infinity() -> f64 {
         unsafe { R_PosInf }
     }
 
     /// Returns an R -Inf value.
-    pub fn infinity_negative() -> f64 {
+    pub fn negative_infinity() -> f64 {
         unsafe { R_NegInf }
     }
 
@@ -189,6 +189,16 @@ impl R {
     /// Checks if an f64 would be considered finite in R.
     pub fn is_finite(x: f64) -> bool {
         unsafe { R_finite(x) != 0 }
+    }
+
+    /// Checks if an f64 would be considered finite in R.
+    pub fn is_positive_infinity(x: f64) -> bool {
+        unsafe { x == R_PosInf }
+    }
+
+    /// Checks if an f64 would be considered finite in R.
+    pub fn is_negative_infinity(x: f64) -> bool {
+        unsafe { x == R_NegInf }
     }
 
     /// Generate random bytes using R's RNG.
@@ -256,12 +266,12 @@ impl<RType, RMode> RObject<RType, RMode> {
     }
 
     /// Recharacterize an RObject<RType, RMode> as an RObject (i.e., an RObject<RAnyType, RUnknown>).
-    pub fn unknown(&self) -> &RObject {
+    pub fn as_unknown(&self) -> &RObject {
         self.transmute()
     }
 
     /// Returns the result of the is_null method, but as an Option value.
-    pub fn option(&self) -> Option<&Self> {
+    pub fn as_option(&self) -> Option<&Self> {
         if self.is_null() {
             None
         } else {
@@ -269,8 +279,8 @@ impl<RType, RMode> RObject<RType, RMode> {
         }
     }
 
-    pub fn scalar(&self) -> Result<&RObject<RScalar>, &'static str> {
-        let s = self.vector()?;
+    pub fn as_scalar(&self) -> Result<&RObject<RScalar, RMode>, &'static str> {
+        let s = self.as_vector()?;
         if s.is_scalar() {
             Ok(self.transmute())
         } else {
@@ -278,8 +288,8 @@ impl<RType, RMode> RObject<RType, RMode> {
         }
     }
 
-    pub fn scalar_mut(&mut self) -> Result<&mut RObject<RScalar>, &'static str> {
-        let s = self.vector()?;
+    pub fn as_scalar_mut(&mut self) -> Result<&mut RObject<RScalar, RMode>, &'static str> {
+        let s = self.as_vector()?;
         if s.is_scalar() {
             Ok(self.transmute_mut())
         } else {
@@ -287,7 +297,7 @@ impl<RType, RMode> RObject<RType, RMode> {
         }
     }
 
-    pub fn vector(&self) -> Result<&RObject<RVector>, &'static str> {
+    pub fn as_vector(&self) -> Result<&RObject<RVector, RMode>, &'static str> {
         if self.is_vector() {
             Ok(self.transmute())
         } else {
@@ -295,7 +305,7 @@ impl<RType, RMode> RObject<RType, RMode> {
         }
     }
 
-    pub fn vector_mut(&mut self) -> Result<&mut RObject<RVector>, &'static str> {
+    pub fn as_vector_mut(&mut self) -> Result<&mut RObject<RVector, RMode>, &'static str> {
         if self.is_vector() {
             Ok(self.transmute_mut())
         } else {
@@ -305,7 +315,7 @@ impl<RType, RMode> RObject<RType, RMode> {
 
     /// Check if appropriate to characterize as an `RObject<RMatrix>`.
     /// Checks using R's `Rf_isMatrix` function.
-    pub fn matrix(&self) -> Result<&RObject<RMatrix>, &'static str> {
+    pub fn as_matrix(&self) -> Result<&RObject<RMatrix, RMode>, &'static str> {
         if self.is_matrix() {
             Ok(self.transmute())
         } else {
@@ -315,7 +325,7 @@ impl<RType, RMode> RObject<RType, RMode> {
 
     /// Check if appropriate to characterize as an `RObject<RMatrix>`.
     /// Checks using R's `Rf_isMatrix` function.
-    pub fn matrix_mut(&mut self) -> Result<&mut RObject<RMatrix>, &'static str> {
+    pub fn as_matrix_mut(&mut self) -> Result<&mut RObject<RMatrix, RMode>, &'static str> {
         if self.is_matrix() {
             Ok(self.transmute_mut())
         } else {
@@ -325,7 +335,7 @@ impl<RType, RMode> RObject<RType, RMode> {
 
     /// Check if appropriate to characterize as an `RObject<RArray>`.
     /// Checks using R's `Rf_isArray` function.
-    pub fn array(&self) -> Result<&RObject<RArray>, &'static str> {
+    pub fn as_array(&self) -> Result<&RObject<RArray, RMode>, &'static str> {
         if self.is_array() {
             Ok(self.transmute())
         } else {
@@ -335,7 +345,7 @@ impl<RType, RMode> RObject<RType, RMode> {
 
     /// Check if appropriate to characterize as an `RObject<RArray>`.
     /// Checks using R's `Rf_isArray` function.
-    pub fn array_mut(&mut self) -> Result<&mut RObject<RArray>, &'static str> {
+    pub fn as_array_mut(&mut self) -> Result<&mut RObject<RArray, RMode>, &'static str> {
         if self.is_array() {
             Ok(self.transmute_mut())
         } else {
@@ -345,7 +355,7 @@ impl<RType, RMode> RObject<RType, RMode> {
 
     /// Check if appropriate to characterize as an `RObject<RVector, RList>`.
     /// Checks using R's `Rf_isVectorList` function.
-    pub fn list(&self) -> Result<&RObject<RList>, &'static str> {
+    pub fn as_list(&self) -> Result<&RObject<RList>, &'static str> {
         if self.is_list() {
             Ok(self.transmute())
         } else {
@@ -355,7 +365,7 @@ impl<RType, RMode> RObject<RType, RMode> {
 
     /// Check if appropriate to characterize as an `RObject<RVector, RList>`.
     /// Checks using R's `Rf_isVectorList` function.
-    pub fn list_mut(&mut self) -> Result<&mut RObject<RList>, &'static str> {
+    pub fn as_list_mut(&mut self) -> Result<&mut RObject<RList>, &'static str> {
         if self.is_list() {
             Ok(self.transmute_mut())
         } else {
@@ -365,7 +375,7 @@ impl<RType, RMode> RObject<RType, RMode> {
 
     /// Check if appropriate to characterize as an `RObject<RVector, RDataFrame>`.
     /// Checks using R's `Rf_isFrame` function.
-    pub fn data_frame(&self) -> Result<&RObject<RList, RDataFrame>, &'static str> {
+    pub fn as_data_frame(&self) -> Result<&RObject<RList, RDataFrame>, &'static str> {
         if self.is_data_frame() {
             Ok(self.transmute())
         } else {
@@ -375,7 +385,7 @@ impl<RType, RMode> RObject<RType, RMode> {
 
     /// Check if appropriate to characterize as an `RObject<RVector, RDataFrame>`.
     /// Checks using R's `Rf_isFrame` function.
-    pub fn data_frame_mut(&mut self) -> Result<&mut RObject<RList, RDataFrame>, &'static str> {
+    pub fn as_data_frame_mut(&mut self) -> Result<&mut RObject<RList, RDataFrame>, &'static str> {
         if self.is_data_frame() {
             Ok(self.transmute_mut())
         } else {
@@ -385,7 +395,7 @@ impl<RType, RMode> RObject<RType, RMode> {
 
     /// Check if appropriate to characterize as an `RObject<RFunction>`.
     /// Checks using R's `Rf_isFunction` function.
-    pub fn function(&self) -> Result<&RObject<RFunction>, &'static str> {
+    pub fn as_function(&self) -> Result<&RObject<RFunction>, &'static str> {
         if self.is_function() {
             Ok(self.transmute())
         } else {
@@ -395,7 +405,7 @@ impl<RType, RMode> RObject<RType, RMode> {
 
     /// Check if appropriate to characterize as an `RObject<RFunction>`.
     /// Checks using R's `Rf_isFunction` function.
-    pub fn function_mut(&mut self) -> Result<&mut RObject<RFunction>, &'static str> {
+    pub fn as_function_mut(&mut self) -> Result<&mut RObject<RFunction>, &'static str> {
         if self.is_function() {
             Ok(self.transmute_mut())
         } else {
@@ -405,7 +415,7 @@ impl<RType, RMode> RObject<RType, RMode> {
 
     /// Check if appropriate to characterize as an `RObject<RExternalPtr>`.
     /// Uses the SEXP type to determine if this is possible.
-    pub fn external_ptr(&self) -> Result<&RObject<RExternalPtr>, &'static str> {
+    pub fn as_external_ptr(&self) -> Result<&RObject<RExternalPtr>, &'static str> {
         if self.is_external_ptr() {
             Ok(self.transmute())
         } else {
@@ -415,7 +425,7 @@ impl<RType, RMode> RObject<RType, RMode> {
 
     /// Check if appropriate to characterize as an `RObject<RExternalPtr>`.
     /// Uses the SEXP type to determine if this is possible.
-    pub fn external_ptr_mut(&mut self) -> Result<&mut RObject<RExternalPtr>, &'static str> {
+    pub fn as_external_ptr_mut(&mut self) -> Result<&mut RObject<RExternalPtr>, &'static str> {
         if self.is_external_ptr() {
             Ok(self.transmute_mut())
         } else {
@@ -425,7 +435,7 @@ impl<RType, RMode> RObject<RType, RMode> {
 
     /// Check if appropriate to characterize as an `RObject<RSymbol>`.
     /// Uses the SEXP type to determine if this is possible.
-    pub fn symbol(&self) -> Result<&RObject<RSymbol>, &'static str> {
+    pub fn as_symbol(&self) -> Result<&RObject<RSymbol>, &'static str> {
         if self.is_symbol() {
             Ok(self.transmute())
         } else {
@@ -435,7 +445,7 @@ impl<RType, RMode> RObject<RType, RMode> {
 
     /// Check if appropriate to characterize as an `RObject<RSymbol>`.
     /// Uses the SEXP type to determine if this is possible.
-    pub fn symbol_mut(&mut self) -> Result<&mut RObject<RSymbol>, &'static str> {
+    pub fn as_symbol_mut(&mut self) -> Result<&mut RObject<RSymbol>, &'static str> {
         if self.is_symbol() {
             Ok(self.transmute_mut())
         } else {
@@ -446,44 +456,6 @@ impl<RType, RMode> RObject<RType, RMode> {
     /// Check if RObject can be interpreted as the NULL value in R.
     pub fn is_null(&self) -> bool {
         unsafe { Rf_isNull(self.sexp()) != 0 }
-    }
-
-    /// Check if RObject can be interpreted as an NA value in R.
-    pub fn is_na(&self) -> bool {
-        if self.is_vector() {
-            let s: &RObject<RVector> = self.transmute();
-            if s.is_scalar() {
-                if s.is_f64() {
-                    unsafe { R_IsNA(Rf_asReal(s.sexp())) != 0 }
-                } else if s.is_i32() {
-                    unsafe { Rf_asInteger(s.sexp()) == R::na_i32() }
-                } else if s.is_bool() {
-                    unsafe { Rf_asLogical(s.sexp()) == R::na_bool() }
-                } else if s.is_character() {
-                    unsafe { Rf_asChar(s.sexp()) == R_NaString }
-                } else {
-                    false
-                }
-            } else {
-                false
-            }
-        } else {
-            false
-        }
-    }
-
-    /// Check if RObject can be interpreted as an NaN value in R.
-    pub fn is_nan(&self) -> bool {
-        if self.is_vector() {
-            let s: &RObject<RVector> = self.transmute();
-            if s.is_scalar() && s.is_f64() {
-                unsafe { R_IsNaN(Rf_asReal(s.sexp())) != 0 }
-            } else {
-                false
-            }
-        } else {
-            false
-        }
     }
 
     pub fn is_vector(&self) -> bool {
@@ -893,7 +865,7 @@ impl<RType> RObject<RArray, RType> {
 
     // Create a new vector from a matrix.
     /// Convert an RArray to a Vector.
-    pub fn as_vector(&mut self) -> &mut RObject<RVector, RType> {
+    pub fn to_vector(&mut self) -> &mut RObject<RVector, RType> {
         unsafe { Rf_setAttrib(self.sexp(), R_DimSymbol, R_NilValue) };
         self.transmute_mut()
     }
@@ -1162,9 +1134,52 @@ impl<RMode> RObject<RScalar, RMode> {
         s.get(0).unwrap()
     }
 
-    /// Manipulates the matrix in place to be a vector by dropping the `dim` attribute.
-    pub fn as_vector(&mut self) -> &mut RObject<RVector, RMode> {
-        self.transmute_mut()
+    /// Check if RObject can be interpreted as an NA value in R.
+    pub fn is_na(&self) -> bool {
+        if self.is_f64() {
+            unsafe { R_IsNA(Rf_asReal(self.sexp())) != 0 }
+        } else if self.is_i32() {
+            unsafe { Rf_asInteger(self.sexp()) == R::na_i32() }
+        } else if self.is_bool() {
+            unsafe { Rf_asLogical(self.sexp()) == R::na_bool() }
+        } else if self.is_character() {
+            unsafe { Rf_asChar(self.sexp()) == R_NaString }
+        } else {
+            false
+        }
+    }
+
+    /// Check if RObject can be interpreted as an NaN value in R.
+    pub fn is_nan(&self) -> bool {
+        if self.is_f64() {
+            unsafe { R_IsNaN(Rf_asReal(self.sexp())) != 0 }
+        } else {
+            false
+        }
+    }
+
+    pub fn is_finite(&self) -> bool {
+        if self.is_f64() {
+            unsafe { R_finite(Rf_asReal(self.sexp())) != 0 }
+        } else {
+            false
+        }
+    }
+
+    pub fn is_positive_infinity(&self) -> bool {
+        if self.is_f64() {
+            unsafe { Rf_asReal(self.sexp()) == R_PosInf }
+        } else {
+            false
+        }
+    }
+
+    pub fn is_negative_infinity(&self) -> bool {
+        if self.is_f64() {
+            unsafe { Rf_asReal(self.sexp()) == R_NegInf }
+        } else {
+            false
+        }
     }
 }
 
@@ -1319,7 +1334,7 @@ macro_rules! rvector {
 
             pub fn from_iter<T>(iter: T, pc: &Pc) -> &mut Self
             where
-                T: IntoIterator<Item = $tipe2> + ExactSizeIterator,
+                T: Iterator<Item = $tipe2> + ExactSizeIterator,
             {
                 let result = Self::new(iter.len(), pc);
                 let slice = result.slice_mut();
@@ -1367,6 +1382,25 @@ impl RObject<RVector, bool> {
 impl RObject<RVector, RCharacter> {
     pub fn new(length: usize, pc: &Pc) -> &mut Self {
         Self::new_engine(STRSXP, length, pc)
+    }
+
+    pub fn from_slice<'a>(slice: &[&str], pc: &'a Pc) -> &'a mut Self {
+        let vector = RObject::<RVector, RCharacter>::new(slice.len(), pc);
+        for (i, v) in slice.iter().enumerate() {
+            let _ = vector.set(i, v);
+        }
+        vector
+    }
+
+    pub fn from_iter<'a, T>(iter: T, pc: &'a Pc) -> &'a mut Self
+    where
+        T: Iterator<Item = &'a str> + ExactSizeIterator,
+    {
+        let vector = RObject::<RVector, RCharacter>::new(iter.len(), pc);
+        for (i, v) in iter.enumerate() {
+            let _ = vector.set(i, v);
+        }
+        vector
     }
 
     /// Get the value at a certain index in a character RVector.
@@ -1625,7 +1659,7 @@ impl<RMode> RObject<RMatrix, RMode> {
     }
 
     /// Manipulates the matrix in place to be a vector by dropping the `dim` attribute.
-    pub fn as_vector(&mut self) -> &mut RObject<RVector, RMode> {
+    pub fn to_vector(&mut self) -> &mut RObject<RVector, RMode> {
         unsafe { Rf_setAttrib(self.sexp(), R_DimSymbol, R_NilValue) };
         self.transmute_mut()
     }
@@ -1644,7 +1678,7 @@ impl<RMode> RObject<RMatrix, RMode> {
     /// Set the dimnames of a matrix.
     pub fn set_dimnames(&mut self, dimnames: &RObject<RList>) -> Result<(), &'static str> {
         match dimnames.get(0) {
-            Ok(rownames) => match rownames.vector() {
+            Ok(rownames) => match rownames.as_vector() {
                 Ok(rownames) => {
                     if rownames.len() != self.nrow() {
                         return Err("Row names do not match the number of rows");
@@ -1657,7 +1691,7 @@ impl<RMode> RObject<RMatrix, RMode> {
             Err(_) => return Err("No row names element found"),
         };
         match dimnames.get(1) {
-            Ok(colnames) => match colnames.vector() {
+            Ok(colnames) => match colnames.as_vector() {
                 Ok(colnames) => {
                     if colnames.len() != self.ncol() {
                         return Err("Column names do not match the number of columns");
@@ -1708,6 +1742,29 @@ macro_rules! rmatrix {
                 Ok(result)
             }
 
+            pub fn from_iter<'a, T>(
+                iter: T,
+                nrow: usize,
+                pc: &'a Pc,
+            ) -> Result<&'a mut Self, &'static str>
+            where
+                T: Iterator<Item = $tipe2> + ExactSizeIterator,
+            {
+                if nrow == 0 && iter.len() == 0 {
+                    return Ok(Self::new(0, 0, pc));
+                }
+                let ncol = iter.len() / nrow;
+                if nrow * ncol != iter.len() {
+                    return Err("Iterator length is not divisible by 'nrow'");
+                }
+                let result = Self::new(nrow, ncol, pc);
+                let slice = result.slice_mut();
+                for (s, d) in slice.iter_mut().zip(iter) {
+                    *s = d;
+                }
+                Ok(result)
+            }
+
             /// Get the value at a certain index in a double RMatrix.
             pub fn get(&self, index: (usize, usize)) -> Result<$tipe2, &'static str> {
                 self.transmute::<RVector, $tipe>().get(self.index(index))
@@ -1751,12 +1808,13 @@ impl RObject<RMatrix, RCharacter> {
     }
 
     pub fn from_value<'a>(value: &str, nrow: usize, ncol: usize, pc: &'a Pc) -> &'a mut Self {
-        let result = Self::new(nrow, ncol, pc);
-        let vector = result.as_vector();
-        for i in 0..vector.len() {
+        let len = nrow * ncol;
+        let vector = RObject::<RVector, RCharacter>::new(len, pc);
+        for i in 0..len {
             let _ = vector.set(i, value);
         }
-        result
+        vector.set_attribute(RObject::<RSymbol>::dim(), [nrow, ncol].to_r(pc));
+        vector.transmute_mut::<RMatrix, RCharacter>()
     }
 
     pub fn from_slice<'a>(
@@ -1771,12 +1829,31 @@ impl RObject<RMatrix, RCharacter> {
         if nrow * ncol != slice.len() {
             return Err("Slice length is not divisible by 'nrow'");
         }
-        let result = Self::new(nrow, ncol, pc);
-        let vector = result.as_vector();
+        let vector = RObject::<RVector, RCharacter>::new(slice.len(), pc);
         for (i, v) in slice.iter().enumerate() {
             let _ = vector.set(i, v);
         }
-        Ok(result)
+        vector.set_attribute(RObject::<RSymbol>::dim(), [nrow, ncol].to_r(pc));
+        Ok(vector.transmute_mut::<RMatrix, RCharacter>())
+    }
+
+    pub fn from_iter<'a, T>(iter: T, nrow: usize, pc: &'a Pc) -> Result<&'a mut Self, &'static str>
+    where
+        T: Iterator<Item = &'a str> + ExactSizeIterator,
+    {
+        if nrow == 0 && iter.len() == 0 {
+            return Ok(Self::new(0, 0, pc));
+        }
+        let ncol = iter.len() / nrow;
+        if nrow * ncol != iter.len() {
+            return Err("Iterator length is not divisible by 'nrow'");
+        }
+        let vector = RObject::<RVector, RCharacter>::new(iter.len(), pc);
+        for (i, v) in iter.enumerate() {
+            let _ = vector.set(i, v);
+        }
+        vector.set_attribute(RObject::<RSymbol>::dim(), [nrow, ncol].to_r(pc));
+        Ok(vector.transmute_mut::<RMatrix, RCharacter>())
     }
 
     /// Get the value at a certain index in a character RMatrix.
