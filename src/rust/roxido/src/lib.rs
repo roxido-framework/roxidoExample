@@ -31,8 +31,8 @@
 //! fn convolve2(a: &RObject<RVector>, b: &RObject<RVector>) {
 //!     let vec = RObject::<RVector, f64>::from_value(0.0, a.len() + b.len() - 1, pc);
 //!     let ab = vec.slice_mut();
-//!     for (i, ai) in a.to_double(pc).slice().iter().enumerate() {
-//!         for (j, bj) in b.to_double(pc).slice().iter().enumerate() {
+//!     for (i, ai) in a.to_f64(pc).slice().iter().enumerate() {
+//!         for (j, bj) in b.to_f64(pc).slice().iter().enumerate() {
 //!             ab[i + j] += ai * bj;
 //!         }
 //!     }
@@ -322,6 +322,7 @@ impl<RType, RMode> RObject<RType, RMode> {
         }
     }
 
+    /// Attempts to recharacterize the RObject as a scalar (i.e., a vector of length 1).
     pub fn as_scalar(&self) -> Result<&RObject<RScalar, RMode>, &'static str> {
         let s = self.as_vector()?;
         if s.is_scalar() {
