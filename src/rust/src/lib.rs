@@ -18,6 +18,7 @@ fn convolve2(a: &RObject<RVector>, b: &RObject<RVector>) {
 
 #[roxido]
 fn zero(f: &RObject<RFunction>, guess1: f64, guess2: f64, tol: f64) {
+    rprintln!("{}", 3);
     if !tol.is_finite() || tol <= 0.0 {
         stop!("'tol' must be a strictly positive value.");
     }
