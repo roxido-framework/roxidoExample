@@ -28,7 +28,7 @@ fn zero(f: &RObject<RFunction>, guess1: f64, guess2: f64, tol: f64) {
             stop!("Error in function evaluation.");
         };
         let fx = fx
-            .scalar()
+            .as_scalar()
             .stop_str("Unexpected return value from function.")
             .f64();
         if !fx.is_finite() {

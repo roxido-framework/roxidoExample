@@ -16,7 +16,7 @@ use std::collections::HashMap;
 use std::ffi::{c_char, c_void, CStr};
 use std::marker::PhantomData;
 
-static TOO_LONG: &str = "Too long to be represented by R";
+static TOO_LONG: &str = "Could not fit usize into i32";
 
 pub struct R;
 
@@ -1428,193 +1428,6 @@ impl RObject<RVector, RCharacter> {
     }
 }
 
-pub struct RListMap<'a, RMode> {
-    unused_counter: usize,
-    used: Vec<bool>,
-    robj: &'a RObject<RList, RMode>,
-    map: HashMap<&'a str, usize>,
-}
-
-impl<RMode> RListMap<'_, RMode> {
-    /// Find an RObject in the list based on its name.
-    pub fn get(&mut self, name: &str) -> Result<&RObject, String> {
-        let Some(index) = self.map.get(name) else {
-            return Err(format!("'{}' not found", name));
-        };
-        if !self.used[*index] {
-            self.unused_counter -= 1;
-            self.used[*index] = true;
-        }
-        Ok(self.robj.get(*index)?)
-    }
-
-    /// Check to see if every RObject in the map has been used.
-    pub fn exhaustive(&self) -> Result<(), String> {
-        if self.unused_counter != 0 {
-            return Err(format!(
-                "Unrecognized elements in list:\n    {}",
-                self.unused_elements().join("\n    ")
-            ));
-        }
-        Ok(())
-    }
-
-    /// Return the number of unused RObjects in the map.
-    pub fn unused_counter(&self) -> usize {
-        self.unused_counter
-    }
-
-    /// Return the names of all unused RObjects in the map.
-    pub fn unused_elements(&self) -> Vec<&str> {
-        let result = self
-            .map
-            .iter()
-            .filter(|(_, index)| !self.used[**index])
-            .map(|(name, _)| *name)
-            .take(self.unused_counter);
-        result.collect()
-    }
-}
-
-impl RObject<RList> {
-    #[allow(clippy::mut_from_ref)]
-    pub fn new(length: usize, pc: &Pc) -> &mut Self {
-        let sexp =
-            pc.protect(unsafe { Rf_allocVector(VECSXP, length.try_into().stop_str(TOO_LONG)) });
-        pc.transmute_sexp_mut(sexp)
-    }
-
-    #[allow(clippy::mut_from_ref)]
-    pub fn with_names<'a, const N: usize>(names: [&str; N], pc: &'a Pc) -> &'a mut Self {
-        let result = Self::new(names.len(), pc);
-        unsafe {
-            Rf_namesgets(result.sexp(), names.to_r(pc).sexp());
-        }
-        result
-    }
-}
-
-impl<RMode> RObject<RList, RMode> {
-    /// Get the value at a certain index in a RList.
-    pub fn get(&self, index: usize) -> Result<&RObject, &'static str> {
-        self.get_engine(index, VECTOR_ELT)
-            .map(|sexp| self.transmute_sexp(sexp))
-    }
-
-    /// Get the value at a certain index in a RList.
-    pub fn get_mut(&mut self, index: usize) -> Result<&mut RObject, &'static str> {
-        self.get_mut_engine(index, VECTOR_ELT)
-            .map(|sexp| self.transmute_sexp_mut(sexp))
-    }
-
-    /// Get a value from the RList based on its key.
-    pub fn get_by_key(&self, key: impl AsRef<str>) -> Result<&RObject, String> {
-        let names = self.get_names();
-        for i in 0..names.len() {
-            if names.get(i).unwrap() == key.as_ref() {
-                return Ok(self.get(i)?);
-            }
-        }
-        Err(format!("Could not find '{}' in the list", key.as_ref()))
-    }
-
-    /// Get a value from the RList based on its key.
-    pub fn get_mut_by_key(&mut self, key: impl AsRef<str>) -> Result<&mut RObject, String> {
-        let names = self.get_names();
-        for i in 0..names.len() {
-            if names.get(i).unwrap() == key.as_ref() {
-                return Ok(self.get_mut(i)?);
-            }
-        }
-        Err(format!("Could not find '{}' in the list", key.as_ref()))
-    }
-
-    /// Convert the list into an [RListMap]
-    ///
-    /// This allows Rust HashMap methods to be used on the contents
-    /// of the list, while still retaining the original list within
-    /// the RListMap struct in the robj field.
-    pub fn make_map(&self) -> RListMap<RMode> {
-        let mut map = HashMap::new();
-        let names = self.get_names();
-        let len = names.len();
-        for i in 0..len {
-            map.insert(names.get(i).unwrap(), i);
-        }
-        RListMap {
-            unused_counter: len,
-            used: vec![false; len],
-            robj: self,
-            map,
-        }
-    }
-
-    /// Set the value at a certain index in an RList.
-    pub fn set<RTypeValue, RModeValue>(
-        &mut self,
-        index: usize,
-        value: &RObject<RTypeValue, RModeValue>,
-    ) -> Result<(), &'static str> {
-        if index < self.len() {
-            unsafe { SET_VECTOR_ELT(self.sexp(), index.try_into().unwrap(), value.sexp()) };
-            Ok(())
-        } else {
-            Err("Index out of bounds")
-        }
-    }
-
-    /// Convert an RList to an RDataFrame.
-    pub fn to_data_frame<'a>(
-        &'a mut self,
-        names: &RObject<RVector, RCharacter>,
-        rownames: &RObject<RVector, RCharacter>,
-        pc: &Pc,
-    ) -> Result<&'a mut RObject<RList, RDataFrame>, &'static str> {
-        if names.len() != self.len() {
-            return Err("Length of names is not correct");
-        }
-        let mut nrow = -1;
-        for i in 0..self.len() {
-            let x = self.get(i).unwrap();
-            if !x.is_vector() {
-                return Err("Expected an atomic vector... Have you set the list elements yet?");
-            }
-            let len = unsafe { Rf_xlength(x.sexp()) };
-            if i == 0 {
-                nrow = len;
-            } else if len != nrow {
-                return Err("Inconsistent number of rows among list elements");
-            }
-        }
-        if rownames.len() != nrow as usize {
-            return Err("Length of row names is not correct");
-        }
-        self.set_names(names)?;
-        unsafe { Rf_setAttrib(self.sexp(), R_RowNamesSymbol, rownames.sexp()) };
-        self.set_class(["data.frame"].to_r(pc));
-        Ok(self.transmute_mut())
-    }
-}
-
-impl RObject<RList, RDataFrame> {
-    /// Get the row names of a RDataFrame.
-    pub fn get_rownames(&self) -> &RObject<RVector, RCharacter> {
-        self.transmute_sexp(unsafe { Rf_getAttrib(self.sexp(), R_RowNamesSymbol) })
-    }
-
-    /// Set the row names of a RDataFrame.
-    pub fn set_rownames(
-        &mut self,
-        rownames: &RObject<RVector, RCharacter>,
-    ) -> Result<(), &'static str> {
-        if unsafe { Rf_length(rownames.sexp()) != Rf_length(self.sexp()) } {
-            return Err("Length of row names is not correct");
-        }
-        unsafe { Rf_setAttrib(self.sexp(), R_RowNamesSymbol, rownames.sexp()) };
-        Ok(())
-    }
-}
-
 impl<RMode> RObject<RMatrix, RMode> {
     #[allow(clippy::mut_from_ref)]
     fn new_engine(code: u32, nrow: usize, ncol: usize, pc: &Pc) -> &mut Self {
@@ -1647,13 +1460,9 @@ impl<RMode> RObject<RMatrix, RMode> {
     #[allow(clippy::mut_from_ref)]
     pub fn transpose<'a>(&self, pc: &'a Pc) -> &'a mut RObject<RMatrix, RMode> {
         let transposed = self.clone(pc);
-        let dim: &mut RObject<RVector, i32> = self
-            .get_attribute(RObject::<RSymbol>::dim())
-            .clone(pc)
-            .transmute_mut();
-        let slice = dim.slice_mut();
-        slice.swap(0, 1);
-        transposed.set_attribute(RObject::<RSymbol>::dim(), dim);
+        let mut dim = transposed.dim();
+        dim.swap(0, 1);
+        transposed.set_attribute(RObject::<RSymbol>::dim(), dim.to_r(pc));
         unsafe { Rf_copyMatrix(transposed.sexp(), self.sexp(), Rboolean_TRUE) };
         transposed
     }
@@ -1870,6 +1679,193 @@ impl RObject<RMatrix, RCharacter> {
     }
 }
 
+pub struct RListMap<'a, RMode> {
+    unused_counter: usize,
+    used: Vec<bool>,
+    robj: &'a RObject<RList, RMode>,
+    map: HashMap<&'a str, usize>,
+}
+
+impl<RMode> RListMap<'_, RMode> {
+    /// Find an RObject in the list based on its name.
+    pub fn get(&mut self, name: &str) -> Result<&RObject, String> {
+        let Some(index) = self.map.get(name) else {
+            return Err(format!("'{}' not found", name));
+        };
+        if !self.used[*index] {
+            self.unused_counter -= 1;
+            self.used[*index] = true;
+        }
+        Ok(self.robj.get(*index)?)
+    }
+
+    /// Check to see if every RObject in the map has been used.
+    pub fn exhaustive(&self) -> Result<(), String> {
+        if self.unused_counter != 0 {
+            return Err(format!(
+                "Unrecognized elements in list:\n    {}",
+                self.unused_elements().join("\n    ")
+            ));
+        }
+        Ok(())
+    }
+
+    /// Return the number of unused RObjects in the map.
+    pub fn unused_counter(&self) -> usize {
+        self.unused_counter
+    }
+
+    /// Return the names of all unused RObjects in the map.
+    pub fn unused_elements(&self) -> Vec<&str> {
+        let result = self
+            .map
+            .iter()
+            .filter(|(_, index)| !self.used[**index])
+            .map(|(name, _)| *name)
+            .take(self.unused_counter);
+        result.collect()
+    }
+}
+
+impl RObject<RList> {
+    #[allow(clippy::mut_from_ref)]
+    pub fn new(length: usize, pc: &Pc) -> &mut Self {
+        let sexp =
+            pc.protect(unsafe { Rf_allocVector(VECSXP, length.try_into().stop_str(TOO_LONG)) });
+        pc.transmute_sexp_mut(sexp)
+    }
+
+    #[allow(clippy::mut_from_ref)]
+    pub fn with_names<'a, const N: usize>(names: [&str; N], pc: &'a Pc) -> &'a mut Self {
+        let result = Self::new(names.len(), pc);
+        unsafe {
+            Rf_namesgets(result.sexp(), names.to_r(pc).sexp());
+        }
+        result
+    }
+}
+
+impl<RMode> RObject<RList, RMode> {
+    /// Get the value at a certain index in a RList.
+    pub fn get(&self, index: usize) -> Result<&RObject, &'static str> {
+        self.get_engine(index, VECTOR_ELT)
+            .map(|sexp| self.transmute_sexp(sexp))
+    }
+
+    /// Get the value at a certain index in a RList.
+    pub fn get_mut(&mut self, index: usize) -> Result<&mut RObject, &'static str> {
+        self.get_mut_engine(index, VECTOR_ELT)
+            .map(|sexp| self.transmute_sexp_mut(sexp))
+    }
+
+    /// Get a value from the RList based on its key.
+    pub fn get_by_key(&self, key: impl AsRef<str>) -> Result<&RObject, String> {
+        let names = self.get_names();
+        for i in 0..names.len() {
+            if names.get(i).unwrap() == key.as_ref() {
+                return Ok(self.get(i)?);
+            }
+        }
+        Err(format!("Could not find '{}' in the list", key.as_ref()))
+    }
+
+    /// Get a value from the RList based on its key.
+    pub fn get_mut_by_key(&mut self, key: impl AsRef<str>) -> Result<&mut RObject, String> {
+        let names = self.get_names();
+        for i in 0..names.len() {
+            if names.get(i).unwrap() == key.as_ref() {
+                return Ok(self.get_mut(i)?);
+            }
+        }
+        Err(format!("Could not find '{}' in the list", key.as_ref()))
+    }
+
+    /// Convert the list into an [RListMap]
+    ///
+    /// This allows Rust HashMap methods to be used on the contents
+    /// of the list, while still retaining the original list within
+    /// the RListMap struct in the robj field.
+    pub fn make_map(&self) -> RListMap<RMode> {
+        let mut map = HashMap::new();
+        let names = self.get_names();
+        let len = names.len();
+        for i in 0..len {
+            map.insert(names.get(i).unwrap(), i);
+        }
+        RListMap {
+            unused_counter: len,
+            used: vec![false; len],
+            robj: self,
+            map,
+        }
+    }
+
+    /// Set the value at a certain index in an RList.
+    pub fn set<RTypeValue, RModeValue>(
+        &mut self,
+        index: usize,
+        value: &RObject<RTypeValue, RModeValue>,
+    ) -> Result<(), &'static str> {
+        if index < self.len() {
+            unsafe { SET_VECTOR_ELT(self.sexp(), index.try_into().unwrap(), value.sexp()) };
+            Ok(())
+        } else {
+            Err("Index out of bounds")
+        }
+    }
+
+    /// Convert an RList to an RDataFrame.
+    pub fn to_data_frame<'a>(
+        &'a mut self,
+        names: &RObject<RVector, RCharacter>,
+        rownames: &RObject<RVector, RCharacter>,
+        pc: &Pc,
+    ) -> Result<&'a mut RObject<RList, RDataFrame>, &'static str> {
+        if names.len() != self.len() {
+            return Err("Length of names is not correct");
+        }
+        let mut nrow = -1;
+        for i in 0..self.len() {
+            let x = self.get(i).unwrap();
+            if !x.is_vector() {
+                return Err("Expected an atomic vector... Have you set the list elements yet?");
+            }
+            let len = unsafe { Rf_xlength(x.sexp()) };
+            if i == 0 {
+                nrow = len;
+            } else if len != nrow {
+                return Err("Inconsistent number of rows among list elements");
+            }
+        }
+        if rownames.len() != nrow as usize {
+            return Err("Length of row names is not correct");
+        }
+        self.set_names(names)?;
+        unsafe { Rf_setAttrib(self.sexp(), R_RowNamesSymbol, rownames.sexp()) };
+        self.set_class(["data.frame"].to_r(pc));
+        Ok(self.transmute_mut())
+    }
+}
+
+impl RObject<RList, RDataFrame> {
+    /// Get the row names of a RDataFrame.
+    pub fn get_rownames(&self) -> &RObject<RVector, RCharacter> {
+        self.transmute_sexp(unsafe { Rf_getAttrib(self.sexp(), R_RowNamesSymbol) })
+    }
+
+    /// Set the row names of a RDataFrame.
+    pub fn set_rownames(
+        &mut self,
+        rownames: &RObject<RVector, RCharacter>,
+    ) -> Result<(), &'static str> {
+        if unsafe { Rf_length(rownames.sexp()) != Rf_length(self.sexp()) } {
+            return Err("Length of row names is not correct");
+        }
+        unsafe { Rf_setAttrib(self.sexp(), R_RowNamesSymbol, rownames.sexp()) };
+        Ok(())
+    }
+}
+
 impl RObject<RExternalPtr> {
     /// Move Rust object to an R external pointer.
     ///
@@ -2050,9 +2046,7 @@ r_from_scalar!(bool, bool, |x: bool| if x {
 } else {
     Rboolean_FALSE as i32
 });
-r_from_scalar!(i32, usize, |x: usize| x
-    .try_into()
-    .stop_str("Could not fit usize into i32"));
+r_from_scalar!(i32, usize, |x: usize| x.try_into().stop_str(TOO_LONG));
 
 impl<'a> ToR<'a, RScalar, RCharacter> for &str {
     fn to_r(&self, pc: &'a Pc) -> &'a mut RObject<RScalar, RCharacter> {
