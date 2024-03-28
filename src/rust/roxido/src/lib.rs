@@ -1227,11 +1227,11 @@ impl<RMode> RObject<RScalar, RMode> {
 }
 
 macro_rules! rscalar {
-    ($tipe:ty, $tipe2:ty, $code1:expr, $code2:expr, $code3:expr) => {
+    ($tipe:ty, $tipe2:ty, $code:expr, $code2:expr, $code3:expr) => {
         impl RObject<RScalar, $tipe> {
             #[allow(clippy::mut_from_ref)]
             pub fn from_value(value: $tipe2, pc: &Pc) -> &mut Self {
-                pc.transmute_sexp_mut(pc.protect(unsafe { $code1(value) }))
+                pc.transmute_sexp_mut(pc.protect(unsafe { $code(value) }))
             }
 
             /// Get the value at a certain index in an $tipe RVector.
@@ -1355,10 +1355,10 @@ impl<RType: ROneDimensional + RHasLength, RMode> RObject<RType, RMode> {
 }
 
 macro_rules! rvector {
-    ($tipe:ty, $tipe2:ty, $code1:expr, $code2:expr, $code3:expr) => {
+    ($tipe:ty, $tipe2:ty, $code:expr, $code2:expr, $code3:expr) => {
         impl RObject<RVector, $tipe> {
             pub fn new(length: usize, pc: &Pc) -> &mut Self {
-                Self::new_engine($code1, length, pc)
+                Self::new_engine($code, length, pc)
             }
 
             pub fn from_value(value: $tipe2, length: usize, pc: &Pc) -> &mut Self {
@@ -2059,7 +2059,6 @@ pub trait FromR<RType, RMode, U> {
 }
 
 /// Trait for converting objects to RObjects.
-///
 pub trait ToR<'a, RType, RMode> {
     #[allow(clippy::mut_from_ref)]
     fn to_r(&self, pc: &'a Pc) -> &'a mut RObject<RType, RMode>;
@@ -2175,8 +2174,31 @@ r_from_array!(bool, bool);
 r_from_array!(i32, usize);
 r_from_array!(RCharacter, &str);
 
-// &RObject and SEXP
+/// Trait for converting iterators to RObjects.
+pub trait ToR2<'a, RType, RMode> {
+    #[allow(clippy::mut_from_ref)]
+    fn to_r(self, pc: &'a Pc) -> &'a mut RObject<RType, RMode>;
+}
 
+macro_rules! r_from_iter {
+    ($tipe:ty, $tipe2:ty) => {
+        impl<'a, T> ToR2<'a, RVector, $tipe> for T
+        where
+            T: Iterator<Item = $tipe2> + ExactSizeIterator,
+        {
+            fn to_r(self, pc: &'a Pc) -> &'a mut RObject<RVector, $tipe> {
+                RObject::<RVector, $tipe>::from_iter(self, pc)
+            }
+        }
+    };
+}
+
+r_from_iter!(f64, f64);
+r_from_iter!(i32, i32);
+r_from_iter!(u8, u8);
+r_from_iter!(RCharacter, &'a str);
+
+// &RObject and SEXP
 impl<'a, RType, RMode> ToR<'a, RAnyType, RUnknown> for RObject<RType, RMode> {
     fn to_r(&self, pc: &'a Pc) -> &'a mut RObject {
         pc.transmute_sexp_mut(self.sexp())

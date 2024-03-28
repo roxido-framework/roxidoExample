@@ -128,7 +128,7 @@ extern "C" fn R_init_{}_rust(info: *mut rbindings::DllInfo) {{
         rbindings::R_useDynamicSymbols(info, 0);
         rbindings::R_forceSymbols(info, 1);
     }
-    roxido::stop::set_custom_panic_hook();
+    roxido::set_custom_panic_hook();
 }"#,
                 );
                 Some(snippet)
