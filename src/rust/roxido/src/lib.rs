@@ -820,7 +820,7 @@ impl<RType: RAtomic + RHasLength, RMode> RObject<RType, RMode> {
     }
 
     /// Check if appropriate to characterize storage mode as "double".
-    pub fn character(&self) -> Result<&RObject<RType, RCharacter>, &'static str> {
+    pub fn as_character(&self) -> Result<&RObject<RType, RCharacter>, &'static str> {
         if self.is_character() {
             Ok(self.transmute())
         } else {
@@ -829,7 +829,7 @@ impl<RType: RAtomic + RHasLength, RMode> RObject<RType, RMode> {
     }
 
     /// Check if appropriate to characterize storage mode as "double".
-    pub fn character_mut(&mut self) -> Result<&mut RObject<RType, RCharacter>, &'static str> {
+    pub fn as_character_mut(&mut self) -> Result<&mut RObject<RType, RCharacter>, &'static str> {
         if self.is_character() {
             Ok(self.transmute_mut())
         } else {
