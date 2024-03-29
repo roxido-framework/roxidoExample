@@ -2207,7 +2207,6 @@ macro_rules! r_from_iter2 {
 r_from_iter2!(f64, f64);
 r_from_iter2!(i32, i32);
 r_from_iter2!(u8, u8);
-r_from_iter2!(bool, i32);
 
 macro_rules! r_from_iter3 {
     ($tipe:ty, $tipe2:ty) => {
@@ -2227,7 +2226,6 @@ macro_rules! r_from_iter3 {
 r_from_iter3!(f64, f64);
 r_from_iter3!(i32, i32);
 r_from_iter3!(u8, u8);
-r_from_iter3!(bool, i32);
 
 // &RObject and SEXP
 impl<'a, RType, RMode> ToR<'a, RAnyType, RUnknown> for RObject<RType, RMode> {
