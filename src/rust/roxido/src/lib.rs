@@ -1378,7 +1378,7 @@ macro_rules! rvector {
 
             pub fn from_iter<T>(iter: T, pc: &Pc) -> &mut Self
             where
-                T: Iterator<Item = $tipe2> + ExactSizeIterator,
+                T: IntoIterator<Item = $tipe2> + ExactSizeIterator,
             {
                 let result = Self::new(iter.len(), pc);
                 let slice = result.slice_mut();
@@ -1597,7 +1597,7 @@ macro_rules! rmatrix {
 
             pub fn from_iter<T>(iter: T, nrow: usize, pc: &Pc) -> Result<&mut Self, &'static str>
             where
-                T: Iterator<Item = $tipe2> + ExactSizeIterator,
+                T: IntoIterator<Item = $tipe2> + ExactSizeIterator,
             {
                 if nrow == 0 && iter.len() == 0 {
                     return Ok(Self::new(0, 0, pc));
@@ -2065,6 +2065,18 @@ pub trait ToR<'a, RType, RMode> {
     fn to_r(&self, pc: &'a Pc) -> &'a mut RObject<RType, RMode>;
 }
 
+/// Trait for converting iterators to RObjects.
+pub trait ToR2<RType, RMode> {
+    #[allow(clippy::mut_from_ref)]
+    fn to_r(self, pc: &Pc) -> &mut RObject<RType, RMode>;
+}
+
+/// Trait for converting iterators to RObjects.
+pub trait ToR3<RType, RMode> {
+    #[allow(clippy::mut_from_ref)]
+    fn to_r(self, pc: &Pc) -> &mut RObject<RType, RMode>;
+}
+
 // scalars
 macro_rules! r_from_scalar {
     ($tipe:ty, $tipe2:ty, $code:expr) => {
@@ -2175,29 +2187,47 @@ r_from_array!(bool, bool);
 r_from_array!(i32, usize);
 r_from_array!(RCharacter, &str);
 
-/// Trait for converting iterators to RObjects.
-pub trait ToR2<'a, RType, RMode> {
-    #[allow(clippy::mut_from_ref)]
-    fn to_r(self, pc: &'a Pc) -> &'a mut RObject<RType, RMode>;
-}
-
-macro_rules! r_from_iter {
+macro_rules! r_from_iter2 {
     ($tipe:ty, $tipe2:ty) => {
-        impl<'a, T> ToR2<'a, RVector, $tipe> for T
-        where
-            T: Iterator<Item = $tipe2> + ExactSizeIterator,
+        impl<'a, T: IntoIterator<Item = &'a $tipe2> + ExactSizeIterator> ToR2<RVector, $tipe>
+            for T
         {
-            fn to_r(self, pc: &'a Pc) -> &'a mut RObject<RVector, $tipe> {
-                RObject::<RVector, $tipe>::from_iter(self, pc)
+            fn to_r(self, pc: &Pc) -> &mut RObject<RVector, $tipe> {
+                let result = RObject::<RVector, $tipe>::new(self.len(), pc);
+                let slice = result.slice_mut();
+                for (to, from) in slice.iter_mut().zip(self) {
+                    *to = *from;
+                }
+                result
             }
         }
     };
 }
 
-r_from_iter!(f64, f64);
-r_from_iter!(i32, i32);
-r_from_iter!(u8, u8);
-r_from_iter!(RCharacter, &'a str);
+r_from_iter2!(f64, f64);
+r_from_iter2!(i32, i32);
+r_from_iter2!(u8, u8);
+r_from_iter2!(bool, i32);
+
+macro_rules! r_from_iter3 {
+    ($tipe:ty, $tipe2:ty) => {
+        impl<'a, T: IntoIterator<Item = $tipe2> + ExactSizeIterator> ToR3<RVector, $tipe> for T {
+            fn to_r(self, pc: &Pc) -> &mut RObject<RVector, $tipe> {
+                let result = RObject::<RVector, $tipe>::new(self.len(), pc);
+                let slice = result.slice_mut();
+                for (to, from) in slice.iter_mut().zip(self) {
+                    *to = from;
+                }
+                result
+            }
+        }
+    };
+}
+
+r_from_iter3!(f64, f64);
+r_from_iter3!(i32, i32);
+r_from_iter3!(u8, u8);
+r_from_iter3!(bool, i32);
 
 // &RObject and SEXP
 impl<'a, RType, RMode> ToR<'a, RAnyType, RUnknown> for RObject<RType, RMode> {
