@@ -75,15 +75,39 @@ pub struct R2Vector2<RMode = RUnknown> {
     rtype: PhantomData<RMode>,
 }
 
-pub trait IsRObject {
-    fn sexp(&self) -> SEXP;
+#[repr(C)]
+pub struct R2Scalar2<RMode = RUnknown> {
+    pub sexprec: SEXPREC,
+    rtype: PhantomData<RMode>,
 }
 
-impl<T> IsRObject for R2Vector2<T> {
+pub trait IsRObject {
     fn sexp(&self) -> SEXP {
         self as *const Self as SEXP
     }
 }
+
+impl<T> IsRObject for R2Scalar2<T> {}
+impl<T> IsRObject for R2Vector2<T> {}
+
+trait IsTransmutable {
+    fn transmute<T: IsRObject>(&self) -> &T
+    where
+        Self: Sized,
+    {
+        unsafe { std::mem::transmute::<&Self, &T>(self) }
+    }
+
+    fn transmute_mut<T: IsRObject>(&mut self) -> &mut T
+    where
+        Self: Sized,
+    {
+        unsafe { std::mem::transmute::<&mut Self, &mut T>(self) }
+    }
+}
+
+impl<T> IsTransmutable for R2Scalar2<T> {}
+impl<T> IsTransmutable for R2Vector2<T> {}
 
 pub struct Pc {
     counter: std::cell::RefCell<i32>,
@@ -135,6 +159,7 @@ pub trait R2HasLength2: IsRObject {
     }
 }
 
+impl<T> R2HasLength2 for R2Scalar2<T> {}
 impl<T> R2HasLength2 for R2Vector2<T> {}
 
 impl RHasLength for RScalar {}
@@ -146,13 +171,11 @@ impl RHasLength for RList {}
 pub trait RAtomic {}
 impl RAtomic for RScalar {}
 impl RAtomic for RVector {}
-impl RAtomic for R2Vector2 {}
 impl RAtomic for RMatrix {}
 impl RAtomic for RArray {}
 
 pub trait ROneDimensional {}
 impl ROneDimensional for RVector {}
-impl ROneDimensional for R2Vector2 {}
 impl ROneDimensional for RList {}
 
 impl Default for Pc {
@@ -192,24 +215,18 @@ impl Pc {
 
     /// This is an implementation detail and *should not* be called directly!
     #[doc(hidden)]
-    pub fn __private_transmute_sexp<RTypeTo, RModeTo>(
-        &self,
-        sexp: SEXP,
-    ) -> &RObject<RTypeTo, RModeTo> {
-        unsafe { &*sexp.cast::<RObject<RTypeTo, RModeTo>>() }
+    pub fn __private_transmute_sexp<T>(&self, sexp: SEXP) -> &T {
+        unsafe { &*sexp.cast::<T>() }
     }
 
     /// This is an implementation detail and *should not* be called directly!
     #[doc(hidden)]
-    pub fn __private_transmute_sexp_mut<'a, RTypeTo, RModeTo>(
-        &self,
-        sexp: SEXP,
-    ) -> &'a mut RObject<RTypeTo, RModeTo> {
-        unsafe { &mut *sexp.cast::<RObject<RTypeTo, RModeTo>>() }
+    pub fn __private_transmute_sexp_mut<'a, T>(&self, sexp: SEXP) -> &'a mut T {
+        unsafe { &mut *sexp.cast::<T>() }
     }
 
-    fn transmute_sexp_static<RTypeTo, RModeTo>(sexp: SEXP) -> &'static RObject<RTypeTo, RModeTo> {
-        unsafe { &*sexp.cast::<RObject<RTypeTo, RModeTo>>() }
+    fn transmute_sexp_static<T>(sexp: SEXP) -> &'static T {
+        unsafe { &*sexp.cast::<T>() }
     }
 }
 
@@ -369,6 +386,15 @@ impl<RType, RMode> RObject<RType, RMode> {
             Ok(self.transmute())
         } else {
             Err("Not a scalar")
+        }
+    }
+
+    pub fn as_2scalar2(&self) -> Result<&R2Scalar2<RMode>, &'static str> {
+        let s = self.as_2vector2()?;
+        if s.is_scalar() {
+            Ok(unsafe { &*self.sexp().cast::<R2Scalar2<RMode>>() })
+        } else {
+            Err("Not a vector")
         }
     }
 
@@ -1275,6 +1301,251 @@ impl<RMode> RObject<RScalar, RMode> {
     }
 }
 
+impl<RMode> R2Scalar2<RMode> {
+    /// Check if appropriate to characterize as an f64.
+    pub fn f64(&self) -> f64 {
+        unsafe { Rf_asReal(self.sexp()) }
+    }
+
+    /// Check if appropriate to characterize as an i32.
+    pub fn i32(&self) -> Result<i32, &'static str> {
+        if self.is_i32() {
+            let x = unsafe { Rf_asInteger(self.sexp()) };
+            if x == i32::MIN {
+                Err("i32 equals R's NA for integers")
+            } else {
+                Ok(x)
+            }
+        } else if self.is_f64() {
+            let y = unsafe { Rf_asReal(self.sexp()) };
+            if y > f64::from(i32::MAX) {
+                Err("Greater than maximum integer value")
+            } else if y < f64::from(i32::MIN) {
+                Err("Less than minimum integer value")
+            } else if y == f64::from(i32::MIN) {
+                Err("Equals R's NA for integers")
+            } else if y.is_nan() {
+                Err("Equals R's NaN")
+            } else {
+                Ok(y.round() as i32)
+            }
+        } else if self.is_u8() {
+            Ok(unsafe { Rf_asInteger(self.sexp()) })
+        } else if self.is_bool() {
+            let y = unsafe { Rf_asLogical(self.sexp()) };
+            if y == i32::MIN {
+                Err("Equals R's NA for logical")
+            } else {
+                Ok(y)
+            }
+        } else {
+            Err("Unsupported R type")
+        }
+    }
+
+    /// Check if appropriate to characterize as a usize.
+    pub fn usize(&self) -> Result<usize, &'static str> {
+        if self.is_i32() {
+            let x = unsafe { Rf_asInteger(self.sexp()) };
+            if x == i32::MIN {
+                Err("Equals R's NA for integers")
+            } else if x < 0 {
+                Err("Negative value not expected")
+            } else {
+                usize::try_from(x).map_err(|_| "Cannot convert to usize")
+            }
+        } else if self.is_f64() {
+            let y = unsafe { Rf_asReal(self.sexp()) };
+            if y < 0.0 {
+                Err("Negative value not expected")
+            } else {
+                let z = y as usize;
+                if z as f64 == y {
+                    Ok(z)
+                } else {
+                    Err("Cannot convert to usize")
+                }
+            }
+        } else if self.is_u8() {
+            let x = unsafe { Rf_asInteger(self.sexp()) };
+            usize::try_from(x).map_err(|_| "Cannot convert to usize")
+        } else if self.is_bool() {
+            let x = unsafe { Rf_asLogical(self.sexp()) };
+            if x == i32::MIN {
+                Err("Equals R's NA for logical")
+            } else {
+                usize::try_from(x).map_err(|_| "Cannot convert to usize")
+            }
+        } else {
+            Err("Unsupported R type")
+        }
+    }
+
+    /// Check if appropriate to characterize as a u8.
+    pub fn u8(&self) -> Result<u8, &'static str> {
+        if self.is_i32() {
+            let x = unsafe { Rf_asInteger(self.sexp()) };
+            u8::try_from(x).map_err(|_| "Cannot convert to u8")
+        } else if self.is_f64() {
+            let y = unsafe { Rf_asReal(self.sexp()) };
+            if y < 0.0 {
+                Err("Negative value not expected")
+            } else {
+                let z = y as u8;
+                if z as f64 == y {
+                    Ok(z)
+                } else {
+                    Err("Cannot convert to u8")
+                }
+            }
+        } else if self.is_u8() {
+            let x = unsafe { Rf_asInteger(self.sexp()) };
+            u8::try_from(x).map_err(|_| "Cannot convert to u8")
+        } else if self.is_bool() {
+            let x = unsafe { Rf_asLogical(self.sexp()) };
+            if x == i32::MIN {
+                Err("Equals R's NA for logical")
+            } else {
+                u8::try_from(x).map_err(|_| "Cannot convert to u8")
+            }
+        } else {
+            Err("Unsupported R type")
+        }
+    }
+
+    /// Check if appropriate to characterize as a bool.
+    pub fn bool(&self) -> Result<bool, &'static str> {
+        if self.is_i32() {
+            let x = unsafe { Rf_asInteger(self.sexp()) };
+            if x == i32::MIN {
+                Err("Equals R's NA for integers")
+            } else {
+                Ok(x != 0)
+            }
+        } else if self.is_f64() {
+            let y = unsafe { Rf_asReal(self.sexp()) };
+            if R::is_na_f64(y) {
+                Err("Equals R's NA for doubles")
+            } else if R::is_nan(y) {
+                Err("Equals R's NaN")
+            } else {
+                Ok(y != 0.0)
+            }
+        } else if self.is_u8() {
+            Ok(unsafe { Rf_asInteger(self.sexp()) } != 0)
+        } else if self.is_bool() {
+            let y = unsafe { Rf_asLogical(self.sexp()) };
+            if y == i32::MIN {
+                Err("Equals R's NA for logical")
+            } else {
+                Ok(y != Rboolean_FALSE as i32)
+            }
+        } else {
+            Err("Unsupported R type")
+        }
+    }
+
+    /// Check if appropriate to characterize as a str reference.
+    pub fn str<'a>(&'a self, pc: &'a Pc) -> &'a str {
+        let s: &R2Vector2<char> = self.to_char(pc).transmute();
+        s.get(0).unwrap()
+    }
+
+    /// Check if RObject can be interpreted as an NA value in R.
+    pub fn is_na(&self) -> bool {
+        if self.is_f64() {
+            unsafe { R_IsNA(Rf_asReal(self.sexp())) != 0 }
+        } else if self.is_i32() {
+            unsafe { Rf_asInteger(self.sexp()) == R::na_i32() }
+        } else if self.is_bool() {
+            unsafe { Rf_asLogical(self.sexp()) == R::na_bool() }
+        } else if self.is_character() {
+            unsafe { Rf_asChar(self.sexp()) == R_NaString }
+        } else {
+            false
+        }
+    }
+
+    /// Check if RObject can be interpreted as an NaN value in R.
+    pub fn is_nan(&self) -> bool {
+        if self.is_f64() {
+            unsafe { R_IsNaN(Rf_asReal(self.sexp())) != 0 }
+        } else {
+            false
+        }
+    }
+
+    pub fn is_finite(&self) -> bool {
+        if self.is_f64() {
+            unsafe { R_finite(Rf_asReal(self.sexp())) != 0 }
+        } else {
+            false
+        }
+    }
+
+    pub fn is_positive_infinity(&self) -> bool {
+        if self.is_f64() {
+            unsafe { Rf_asReal(self.sexp()) == R_PosInf }
+        } else {
+            false
+        }
+    }
+
+    pub fn is_negative_infinity(&self) -> bool {
+        if self.is_f64() {
+            unsafe { Rf_asReal(self.sexp()) == R_NegInf }
+        } else {
+            false
+        }
+    }
+}
+
+pub trait RScalarConstructor<T> {
+    #[allow(clippy::mut_from_ref)]
+    fn from_value(value: T, pc: &Pc) -> &mut Self;
+}
+
+macro_rules! r2scalar2 {
+    ($tipe:ty, $code:expr) => {
+        impl RScalarConstructor<$tipe> for R2Scalar2<$tipe> {
+            #[allow(clippy::mut_from_ref)]
+            fn from_value(value: $tipe, pc: &Pc) -> &mut Self {
+                pc.__private_transmute_sexp_mut(pc.protect(unsafe { $code(value) }))
+            }
+        }
+    };
+}
+
+r2scalar2!(f64, Rf_ScalarReal);
+r2scalar2!(i32, Rf_ScalarInteger);
+r2scalar2!(u8, Rf_ScalarRaw);
+
+impl RScalarConstructor<bool> for R2Scalar2<bool> {
+    #[allow(clippy::mut_from_ref)]
+    fn from_value(value: bool, pc: &Pc) -> &mut Self {
+        pc.__private_transmute_sexp_mut(pc.protect(unsafe {
+            Rf_ScalarLogical(if value {
+                Rboolean_TRUE as i32
+            } else {
+                Rboolean_FALSE as i32
+            })
+        }))
+    }
+}
+
+impl RScalarConstructor<&str> for R2Scalar2<char> {
+    #[allow(clippy::mut_from_ref)]
+    fn from_value<'a>(value: &str, pc: &'a Pc) -> &'a mut Self {
+        pc.__private_transmute_sexp_mut(pc.protect(unsafe {
+            Rf_ScalarString(pc.protect(Rf_mkCharLenCE(
+                value.as_ptr() as *const c_char,
+                value.len().try_into().stop_str(TOO_LONG),
+                cetype_t_CE_UTF8,
+            )))
+        }))
+    }
+}
+
 macro_rules! rscalar {
     ($tipe:ty, $tipe2:ty, $code:expr, $code2:expr, $code3:expr) => {
         impl RObject<RScalar, $tipe> {
@@ -1453,6 +1724,230 @@ rvector!(f64, f64, REALSXP, REAL_ELT, SET_REAL_ELT);
 rvector!(i32, i32, INTSXP, INTEGER_ELT, SET_INTEGER_ELT);
 rvector!(u8, u8, RAWSXP, RAW_ELT, SET_RAW_ELT);
 rvector!(bool, i32, LGLSXP, LOGICAL_ELT, SET_LOGICAL_ELT);
+
+macro_rules! rconvertable {
+    ($name:ident) => {
+        impl<T> $name<T> {
+            /// Check if appropriate to characterize storage mode as "double".
+            pub fn as_f64(&self) -> Result<&$name<f64>, &'static str> {
+                if self.is_f64() {
+                    Ok(self.transmute())
+                } else {
+                    Err("Not of storage mode 'double'")
+                }
+            }
+
+            /// Check if appropriate to characterize storage mode as "double".
+            pub fn as_f64_mut(&mut self) -> Result<&mut $name<f64>, &'static str> {
+                if self.is_f64() {
+                    Ok(self.transmute_mut())
+                } else {
+                    Err("Not of storage mode 'double'")
+                }
+            }
+
+            /// Checks to see if the data can be interpreted as R double.
+            pub fn is_f64(&self) -> bool {
+                unsafe { Rf_isReal(self.sexp()) != 0 }
+            }
+
+            /// Attempts to coerce storage mode to "double".
+            pub fn to_f64<'a>(&'a self, pc: &'a Pc) -> &'a $name<f64> {
+                if self.is_f64() {
+                    self.transmute()
+                } else {
+                    let sexp = pc.protect(unsafe { Rf_coerceVector(self.sexp(), REALSXP) });
+                    pc.__private_transmute_sexp(sexp)
+                }
+            }
+
+            /// Attempts to coerce storage mode to "double".
+            pub fn to_f64_mut(&mut self, pc: &Pc) -> &mut $name<f64> {
+                if self.is_f64() {
+                    self.transmute_mut()
+                } else {
+                    let sexp = pc.protect(unsafe { Rf_coerceVector(self.sexp(), REALSXP) });
+                    pc.__private_transmute_sexp_mut(sexp)
+                }
+            }
+
+            /// Check if appropriate to characterize storage mode as "double".
+            pub fn as_i32(&self) -> Result<&$name<i32>, &'static str> {
+                if self.is_i32() {
+                    Ok(self.transmute())
+                } else {
+                    Err("Not of storage mode 'integer'")
+                }
+            }
+
+            /// Check if appropriate to characterize storage mode as "double".
+            pub fn as_i32_mut(&mut self) -> Result<&mut $name<i32>, &'static str> {
+                if self.is_i32() {
+                    Ok(self.transmute_mut())
+                } else {
+                    Err("Not of storage mode 'integer'")
+                }
+            }
+
+            /// Checks to see if the data can be interpreted as R double.
+            pub fn is_i32(&self) -> bool {
+                unsafe { Rf_isInteger(self.sexp()) != 0 }
+            }
+
+            /// Attempts to coerce storage mode to "double".
+            pub fn to_i32<'a>(&'a self, pc: &'a Pc) -> &'a $name<i32> {
+                if self.is_i32() {
+                    self.transmute()
+                } else {
+                    let sexp = pc.protect(unsafe { Rf_coerceVector(self.sexp(), INTSXP) });
+                    pc.__private_transmute_sexp(sexp)
+                }
+            }
+
+            /// Attempts to coerce storage mode to "double".
+            pub fn to_i32_mut(&mut self, pc: &Pc) -> &mut $name<i32> {
+                if self.is_i32() {
+                    self.transmute_mut()
+                } else {
+                    let sexp = pc.protect(unsafe { Rf_coerceVector(self.sexp(), INTSXP) });
+                    pc.__private_transmute_sexp_mut(sexp)
+                }
+            }
+
+            /// Check if appropriate to characterize storage mode as "double".
+            pub fn as_u8(&self) -> Result<&$name<u8>, &'static str> {
+                if self.is_u8() {
+                    Ok(self.transmute())
+                } else {
+                    Err("Not of storage mode 'raw'")
+                }
+            }
+
+            /// Check if appropriate to characterize storage mode as "double".
+            pub fn as_u8_mut(&mut self) -> Result<&mut $name<u8>, &'static str> {
+                if self.is_u8() {
+                    Ok(self.transmute_mut())
+                } else {
+                    Err("Not of storage mode 'raw'")
+                }
+            }
+
+            /// Checks to see if the data can be interpreted as R double.
+            pub fn is_u8(&self) -> bool {
+                unsafe { TYPEOF(self.sexp()) == RAWSXP as i32 }
+            }
+
+            /// Attempts to coerce storage mode to "double".
+            pub fn to_u8<'a>(&'a self, pc: &'a Pc) -> &'a $name<u8> {
+                if self.is_u8() {
+                    self.transmute()
+                } else {
+                    let sexp = pc.protect(unsafe { Rf_coerceVector(self.sexp(), RAWSXP) });
+                    pc.__private_transmute_sexp(sexp)
+                }
+            }
+
+            /// Attempts to coerce storage mode to "double".
+            pub fn to_u8_mut(&mut self, pc: &Pc) -> &mut $name<u8> {
+                if self.is_u8() {
+                    self.transmute_mut()
+                } else {
+                    let sexp = pc.protect(unsafe { Rf_coerceVector(self.sexp(), RAWSXP) });
+                    pc.__private_transmute_sexp_mut(sexp)
+                }
+            }
+
+            /// Check if appropriate to characterize storage mode as "double".
+            pub fn as_bool(&self) -> Result<&$name<bool>, &'static str> {
+                if self.is_bool() {
+                    Ok(self.transmute())
+                } else {
+                    Err("Not of storage mode 'logical'")
+                }
+            }
+
+            /// Check if appropriate to characterize storage mode as "double".
+            pub fn as_bool_mut(&mut self) -> Result<&mut $name<bool>, &'static str> {
+                if self.is_bool() {
+                    Ok(self.transmute_mut())
+                } else {
+                    Err("Not of storage mode 'logical'")
+                }
+            }
+
+            /// Checks to see if the data can be interpreted as R double.
+            pub fn is_bool(&self) -> bool {
+                unsafe { Rf_isLogical(self.sexp()) != 0 }
+            }
+
+            /// Attempts to coerce storage mode to "double".
+            pub fn to_bool<'a>(&'a self, pc: &'a Pc) -> &'a $name<bool> {
+                if self.is_bool() {
+                    self.transmute()
+                } else {
+                    let sexp = pc.protect(unsafe { Rf_coerceVector(self.sexp(), LGLSXP) });
+                    pc.__private_transmute_sexp(sexp)
+                }
+            }
+
+            /// Attempts to coerce storage mode to "double".
+            pub fn to_bool_mut(&mut self, pc: &Pc) -> &mut $name<bool> {
+                if self.is_bool() {
+                    self.transmute_mut()
+                } else {
+                    let sexp = pc.protect(unsafe { Rf_coerceVector(self.sexp(), LGLSXP) });
+                    pc.__private_transmute_sexp_mut(sexp)
+                }
+            }
+
+            /// Check if appropriate to characterize storage mode as "double".
+            pub fn as_character(&self) -> Result<&$name<RCharacter>, &'static str> {
+                if self.is_character() {
+                    Ok(self.transmute())
+                } else {
+                    Err("Not of storage mode 'character'")
+                }
+            }
+
+            /// Check if appropriate to characterize storage mode as "double".
+            pub fn as_character_mut(&mut self) -> Result<&mut $name<RCharacter>, &'static str> {
+                if self.is_character() {
+                    Ok(self.transmute_mut())
+                } else {
+                    Err("Not of storage mode 'character'")
+                }
+            }
+
+            /// Checks to see if the data can be interpreted as R double.
+            pub fn is_character(&self) -> bool {
+                unsafe { Rf_isString(self.sexp()) != 0 }
+            }
+
+            /// Attempts to coerce storage mode to "double".
+            pub fn to_char<'a>(&'a self, pc: &'a Pc) -> &'a $name<RCharacter> {
+                if self.is_character() {
+                    self.transmute()
+                } else {
+                    let sexp = pc.protect(unsafe { Rf_coerceVector(self.sexp(), STRSXP) });
+                    pc.__private_transmute_sexp(sexp)
+                }
+            }
+
+            /// Attempts to coerce storage mode to "double".
+            pub fn to_char_mut(&mut self, pc: &Pc) -> &mut $name<RCharacter> {
+                if self.is_character() {
+                    self.transmute_mut()
+                } else {
+                    let sexp = pc.protect(unsafe { Rf_coerceVector(self.sexp(), STRSXP) });
+                    pc.__private_transmute_sexp_mut(sexp)
+                }
+            }
+        }
+    };
+}
+
+rconvertable!(R2Scalar2);
+rconvertable!(R2Vector2);
 
 pub trait RSliceable<T, T2> {
     fn slice(&self) -> &[T];
@@ -1640,6 +2135,27 @@ impl RSliceable<i32, bool> for R2Vector2<bool> {
     }
 }
 
+impl R2Vector2<bool> {
+    /// Get the value at a certain index in an $tipe RVector.
+    pub fn get_i32(&self, index: usize) -> Result<i32, &'static str> {
+        if index < self.len() {
+            Ok(unsafe { LOGICAL_ELT(self.sexp(), index.try_into().unwrap()) })
+        } else {
+            Err("Index out of bounds")
+        }
+    }
+
+    /// Set the value at a certain index in an $tipe RVector.
+    pub fn set_i32(&mut self, index: usize, value: i32) -> Result<(), &'static str> {
+        if index < self.len() {
+            unsafe { SET_LOGICAL_ELT(self.sexp(), index.try_into().unwrap(), value) };
+            Ok(())
+        } else {
+            Err("Index out of bounds")
+        }
+    }
+}
+
 impl RVectorConstructors<bool> for R2Vector2<bool> {
     fn new(length: usize, pc: &Pc) -> &mut Self {
         let sexp =
@@ -1660,27 +2176,6 @@ impl RVectorConstructors<bool> for R2Vector2<bool> {
 
     fn from_slice<'a>(slice: &[bool], pc: &'a Pc) -> &'a mut Self {
         Self::from_iter2(slice.iter(), pc)
-    }
-}
-
-impl R2Vector2<bool> {
-    /// Get the value at a certain index in an $tipe RVector.
-    pub fn get_i32(&self, index: usize) -> Result<i32, &'static str> {
-        if index < self.len() {
-            Ok(unsafe { LOGICAL_ELT(self.sexp(), index.try_into().unwrap()) })
-        } else {
-            Err("Index out of bounds")
-        }
-    }
-
-    /// Set the value at a certain index in an $tipe RVector.
-    pub fn set_i32(&mut self, index: usize, value: i32) -> Result<(), &'static str> {
-        if index < self.len() {
-            unsafe { SET_LOGICAL_ELT(self.sexp(), index.try_into().unwrap(), value) };
-            Ok(())
-        } else {
-            Err("Index out of bounds")
-        }
     }
 }
 
@@ -2437,6 +2932,87 @@ pub trait ToR3<RType, RMode> {
     #[allow(clippy::mut_from_ref)]
     fn to_r(self, pc: &Pc) -> &mut RObject<RType, RMode>;
 }
+
+/// Trait for converting objects to RObjects.
+pub trait To2RScalar2<RMode> {
+    #[allow(clippy::mut_from_ref)]
+    fn to_2r(self, pc: &Pc) -> &mut R2Scalar2<RMode>;
+}
+
+macro_rules! to_2rscalar2 {
+    ($tipe:ty, $tipe2:ty) => {
+        impl<'a> To2RScalar2<$tipe> for $tipe2 {
+            fn to_2r(self, pc: &Pc) -> &mut R2Scalar2<$tipe> {
+                R2Scalar2::from_value(self, pc)
+            }
+        }
+    };
+}
+
+to_2rscalar2!(f64, f64);
+to_2rscalar2!(i32, i32);
+to_2rscalar2!(u8, u8);
+to_2rscalar2!(bool, bool);
+to_2rscalar2!(char, &str);
+
+impl To2RScalar2<i32> for usize {
+    fn to_2r(self, pc: &Pc) -> &mut R2Scalar2<i32> {
+        R2Scalar2::from_value(self.try_into().stop_str(TOO_LONG), pc)
+    }
+}
+
+/// Trait for converting objects to RObjects.
+pub trait To2RVector2<RMode> {
+    #[allow(clippy::mut_from_ref)]
+    fn to_2r(self, pc: &Pc) -> &mut R2Vector2<RMode>;
+}
+
+/// Trait for converting iterators to RObjects.
+pub trait To2RVector22<RMode> {
+    #[allow(clippy::mut_from_ref)]
+    fn to_2r(self, pc: &Pc) -> &mut R2Vector2<RMode>;
+}
+
+pub trait To2RVector33<RMode> {
+    #[allow(clippy::mut_from_ref)]
+    fn to_2r(self, pc: &Pc) -> &mut R2Vector2<RMode>;
+}
+
+macro_rules! to_2rvector2 {
+    ($tipe:ty, $tipe2:ty) => {
+        impl<'a, const N: usize> To2RVector22<$tipe> for [$tipe2; N] {
+            fn to_2r(self, pc: &Pc) -> &mut R2Vector2<$tipe> {
+                R2Vector2::from_array(self, pc)
+            }
+        }
+        impl<'a> To2RVector2<$tipe> for &[$tipe2] {
+            fn to_2r(self, pc: &Pc) -> &mut R2Vector2<$tipe> {
+                R2Vector2::from_slice(self, pc)
+            }
+        }
+    };
+}
+
+to_2rvector2!(f64, f64);
+to_2rvector2!(i32, i32);
+to_2rvector2!(u8, u8);
+to_2rvector2!(bool, bool);
+to_2rvector2!(char, &str);
+
+macro_rules! to_2rvector24 {
+    ($tipe:ty, $tipe2:ty) => {
+        impl<'a, T: IntoIterator<Item = &'a $tipe2> + ExactSizeIterator> To2RVector33<$tipe> for T {
+            fn to_2r(self, pc: &Pc) -> &mut R2Vector2<$tipe> {
+                R2Vector2::from_iter2(self, pc)
+            }
+        }
+    };
+}
+
+to_2rvector24!(f64, f64);
+to_2rvector24!(i32, i32);
+to_2rvector24!(u8, u8);
+to_2rvector24!(bool, bool);
 
 // scalars
 macro_rules! r_from_scalar {

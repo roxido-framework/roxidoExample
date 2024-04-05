@@ -8,6 +8,23 @@ use roxido::*;
 fn convolve4(a: &RObject<RVector, f64>, b: &RObject<RVector, f64>) {
     let a = a.as_2vector2().stop_str("'a' should be a vector");
     let b = b.as_2vector2().stop_str("'b' should be a vector");
+
+    let vec_3 = RObject::<RVector, f64>::from_value(5.0, a.len() + b.len() - 1, pc);
+
+    let vec_3 = R2Vector2::from_value(5.0, a.len() + b.len() - 1, pc);
+    // let vec_3 = RVector::from_value(5.0, a.len() + b.len() - 1, pc);
+
+    let bob = ["David", "Dahl"].to_2r(pc);
+    let bob = [false, true].to_2r(pc);
+
+    let bill = "David".to_2r(pc);
+    let bill = 1.0.to_2r(pc);
+    let bill = 1_usize.to_2r(pc);
+
+    // let first_names
+    // let ages = c(1,2,3);
+    // let vec_3: () = RList::from_tuples([("first",first_names),("ages",ages)], pc);
+
     let vec_3 = R2Vector2::<f64>::new(a.len() + b.len() - 1, pc);
     let vec_3 = R2Vector2::<char>::new(a.len() + b.len() - 1, pc);
     vec_3.set(4, "advid", pc);
