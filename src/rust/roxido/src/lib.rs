@@ -69,6 +69,22 @@ pub struct RObject<RType = RAnyType, RMode = RUnknown> {
     rtype: PhantomData<(RType, RMode)>,
 }
 
+#[repr(C)]
+pub struct R2Vector2<RMode = RUnknown> {
+    pub sexprec: SEXPREC,
+    rtype: PhantomData<RMode>,
+}
+
+pub trait IsRObject {
+    fn sexp(&self) -> SEXP;
+}
+
+impl<T> IsRObject for R2Vector2<T> {
+    fn sexp(&self) -> SEXP {
+        self as *const Self as SEXP
+    }
+}
+
 pub struct Pc {
     counter: std::cell::RefCell<i32>,
 }
@@ -100,6 +116,27 @@ pub struct RSymbol;
 pub struct RError;
 
 pub trait RHasLength {}
+
+pub trait R2HasLength2: IsRObject {
+    /// Returns the length of the RObject.
+    fn len(&self) -> usize {
+        let len = unsafe { Rf_xlength(self.sexp()) };
+        len.try_into().unwrap() // Won't ever fail if R is sane.
+    }
+
+    /// Checks to see if the RObject is empty.
+    fn is_empty(&self) -> bool {
+        unsafe { Rf_xlength(self.sexp()) == 0 }
+    }
+
+    /// Checks to see if the RObject is a scalar (has a length of 1).
+    fn is_scalar(&self) -> bool {
+        unsafe { Rf_xlength(self.sexp()) == 1 }
+    }
+}
+
+impl<T> R2HasLength2 for R2Vector2<T> {}
+
 impl RHasLength for RScalar {}
 impl RHasLength for RVector {}
 impl RHasLength for RMatrix {}
@@ -109,11 +146,13 @@ impl RHasLength for RList {}
 pub trait RAtomic {}
 impl RAtomic for RScalar {}
 impl RAtomic for RVector {}
+impl RAtomic for R2Vector2 {}
 impl RAtomic for RMatrix {}
 impl RAtomic for RArray {}
 
 pub trait ROneDimensional {}
 impl ROneDimensional for RVector {}
+impl ROneDimensional for R2Vector2 {}
 impl ROneDimensional for RList {}
 
 impl Default for Pc {
@@ -345,6 +384,14 @@ impl<RType, RMode> RObject<RType, RMode> {
     pub fn as_vector(&self) -> Result<&RObject<RVector, RMode>, &'static str> {
         if self.is_vector() {
             Ok(self.transmute())
+        } else {
+            Err("Not a vector")
+        }
+    }
+
+    pub fn as_2vector2(&self) -> Result<&R2Vector2<RMode>, &'static str> {
+        if self.is_vector() {
+            Ok(unsafe { &*self.sexp().cast::<R2Vector2<RMode>>() })
         } else {
             Err("Not a vector")
         }
@@ -1407,6 +1454,319 @@ rvector!(i32, i32, INTSXP, INTEGER_ELT, SET_INTEGER_ELT);
 rvector!(u8, u8, RAWSXP, RAW_ELT, SET_RAW_ELT);
 rvector!(bool, i32, LGLSXP, LOGICAL_ELT, SET_LOGICAL_ELT);
 
+pub trait RSliceable<T, T2> {
+    fn slice(&self) -> &[T];
+
+    fn slice_mut(&mut self) -> &mut [T];
+
+    #[allow(clippy::mut_from_ref)]
+    fn from_iter1<S>(iter: S, pc: &Pc) -> &mut Self
+    where
+        S: IntoIterator<Item = T2> + ExactSizeIterator;
+
+    #[allow(clippy::mut_from_ref)]
+    fn from_iter2<'a, 'b, S>(iter: S, pc: &'a Pc) -> &'a mut Self
+    where
+        S: IntoIterator<Item = &'b T2> + ExactSizeIterator,
+        T2: 'b;
+
+    /// Get the value at a certain index in an $tipe RVector.
+    fn get(&self, index: usize) -> Result<T2, &'static str>;
+
+    /// Set the value at a certain index in an $tipe RVector.
+    fn set(&mut self, index: usize, value: T2) -> Result<(), &'static str>;
+}
+
+pub trait RVectorConstructors<T> {
+    #[allow(clippy::mut_from_ref)]
+    fn new(length: usize, pc: &Pc) -> &mut Self;
+
+    #[allow(clippy::mut_from_ref)]
+    fn from_value(value: T, length: usize, pc: &Pc) -> &mut Self;
+
+    #[allow(clippy::mut_from_ref)]
+    fn from_array<const N: usize>(slice: [T; N], pc: &Pc) -> &mut Self;
+
+    #[allow(clippy::mut_from_ref)]
+    fn from_slice<'a>(slice: &[T], pc: &'a Pc) -> &'a mut Self;
+}
+
+macro_rules! r2vector2 {
+    ($tipe:ty, $code:expr, $ptr:expr, $get:expr, $set:expr) => {
+        impl RSliceable<$tipe, $tipe> for R2Vector2<$tipe> {
+            fn slice(&self) -> &[$tipe] {
+                unsafe { std::slice::from_raw_parts($ptr(self.sexp()), self.len()) }
+            }
+
+            fn slice_mut(&mut self) -> &mut [$tipe] {
+                unsafe { std::slice::from_raw_parts_mut($ptr(self.sexp()), self.len()) }
+            }
+
+            fn from_iter1<T>(iter: T, pc: &Pc) -> &mut Self
+            where
+                T: IntoIterator<Item = $tipe> + ExactSizeIterator,
+            {
+                let result = Self::new(iter.len(), pc);
+                let slice = result.slice_mut();
+                for (s, d) in slice.iter_mut().zip(iter) {
+                    *s = d;
+                }
+                result
+            }
+
+            fn from_iter2<'a, 'b, T>(iter: T, pc: &'a Pc) -> &'a mut Self
+            where
+                T: IntoIterator<Item = &'b $tipe> + ExactSizeIterator,
+            {
+                let result = Self::new(iter.len(), pc);
+                let slice = result.slice_mut();
+                for (s, d) in slice.iter_mut().zip(iter) {
+                    *s = *d;
+                }
+                result
+            }
+
+            /// Get the value at a certain index in an $tipe RVector.
+            fn get(&self, index: usize) -> Result<$tipe, &'static str> {
+                if index < self.len() {
+                    Ok(unsafe { $get(self.sexp(), index.try_into().unwrap()) })
+                } else {
+                    Err("Index out of bounds")
+                }
+            }
+
+            /// Set the value at a certain index in an $tipe RVector.
+            fn set(&mut self, index: usize, value: $tipe) -> Result<(), &'static str> {
+                if index < self.len() {
+                    unsafe { $set(self.sexp(), index.try_into().unwrap(), value) };
+                    Ok(())
+                } else {
+                    Err("Index out of bounds")
+                }
+            }
+        }
+
+        impl RVectorConstructors<$tipe> for R2Vector2<$tipe> {
+            fn new(length: usize, pc: &Pc) -> &mut Self {
+                let sexp = pc.protect(unsafe {
+                    Rf_allocVector($code, length.try_into().stop_str(TOO_LONG))
+                });
+                unsafe { &mut *sexp.cast::<R2Vector2<$tipe>>() }
+            }
+
+            fn from_value(value: $tipe, length: usize, pc: &Pc) -> &mut Self {
+                let result = Self::new(length, pc);
+                let slice = result.slice_mut();
+                slice.fill(value);
+                result
+            }
+
+            fn from_array<const N: usize>(slice: [$tipe; N], pc: &Pc) -> &mut Self {
+                let result = Self::new(slice.len(), pc);
+                let slice2 = result.slice_mut();
+                slice2.copy_from_slice(slice.as_ref());
+                result
+            }
+
+            fn from_slice<'a>(slice: &[$tipe], pc: &'a Pc) -> &'a mut Self {
+                let result = Self::new(slice.len(), pc);
+                let slice2 = result.slice_mut();
+                slice2.copy_from_slice(slice);
+                result
+            }
+        }
+    };
+}
+
+r2vector2!(f64, REALSXP, REAL, REAL_ELT, SET_REAL_ELT);
+r2vector2!(i32, INTSXP, INTEGER, INTEGER_ELT, SET_INTEGER_ELT);
+r2vector2!(u8, RAWSXP, RAW, RAW_ELT, SET_RAW_ELT);
+
+impl RSliceable<i32, bool> for R2Vector2<bool> {
+    fn slice(&self) -> &[i32] {
+        unsafe { std::slice::from_raw_parts(LOGICAL(self.sexp()), self.len()) }
+    }
+
+    fn slice_mut(&mut self) -> &mut [i32] {
+        unsafe { std::slice::from_raw_parts_mut(LOGICAL(self.sexp()), self.len()) }
+    }
+
+    fn from_iter1<T>(iter: T, pc: &Pc) -> &mut Self
+    where
+        T: IntoIterator<Item = bool> + ExactSizeIterator,
+    {
+        let result = Self::new(iter.len(), pc);
+        let slice = result.slice_mut();
+        for (s, d) in slice.iter_mut().zip(iter) {
+            *s = d as i32;
+        }
+        result
+    }
+
+    fn from_iter2<'a, 'b, T>(iter: T, pc: &'a Pc) -> &'a mut Self
+    where
+        T: IntoIterator<Item = &'b bool> + ExactSizeIterator,
+    {
+        let result = Self::new(iter.len(), pc);
+        let slice = result.slice_mut();
+        for (s, d) in slice.iter_mut().zip(iter) {
+            *s = *d as i32;
+        }
+        result
+    }
+    /// Get the value at a certain index in an $tipe RVector.
+    fn get(&self, index: usize) -> Result<bool, &'static str> {
+        if index < self.len() {
+            let value = unsafe { LOGICAL_ELT(self.sexp(), index.try_into().unwrap()) };
+            Ok(value != Rboolean_FALSE as i32 && !R::is_na_bool(value))
+        } else {
+            Err("Index out of bounds")
+        }
+    }
+
+    /// Set the value at a certain index in an $tipe RVector.
+    fn set(&mut self, index: usize, value: bool) -> Result<(), &'static str> {
+        if index < self.len() {
+            let value = if value {
+                Rboolean_TRUE as i32
+            } else {
+                Rboolean_FALSE as i32
+            };
+            unsafe { SET_LOGICAL_ELT(self.sexp(), index.try_into().unwrap(), value) };
+            Ok(())
+        } else {
+            Err("Index out of bounds")
+        }
+    }
+}
+
+impl RVectorConstructors<bool> for R2Vector2<bool> {
+    fn new(length: usize, pc: &Pc) -> &mut Self {
+        let sexp =
+            pc.protect(unsafe { Rf_allocVector(LGLSXP, length.try_into().stop_str(TOO_LONG)) });
+        unsafe { &mut *sexp.cast::<R2Vector2<bool>>() }
+    }
+
+    fn from_value(value: bool, length: usize, pc: &Pc) -> &mut Self {
+        let result = Self::new(length, pc);
+        let slice = result.slice_mut();
+        slice.fill(value as i32);
+        result
+    }
+
+    fn from_array<const N: usize>(slice: [bool; N], pc: &Pc) -> &mut Self {
+        Self::from_iter2(slice.iter(), pc)
+    }
+
+    fn from_slice<'a>(slice: &[bool], pc: &'a Pc) -> &'a mut Self {
+        Self::from_iter2(slice.iter(), pc)
+    }
+}
+
+impl R2Vector2<bool> {
+    /// Get the value at a certain index in an $tipe RVector.
+    pub fn get_i32(&self, index: usize) -> Result<i32, &'static str> {
+        if index < self.len() {
+            Ok(unsafe { LOGICAL_ELT(self.sexp(), index.try_into().unwrap()) })
+        } else {
+            Err("Index out of bounds")
+        }
+    }
+
+    /// Set the value at a certain index in an $tipe RVector.
+    pub fn set_i32(&mut self, index: usize, value: i32) -> Result<(), &'static str> {
+        if index < self.len() {
+            unsafe { SET_LOGICAL_ELT(self.sexp(), index.try_into().unwrap(), value) };
+            Ok(())
+        } else {
+            Err("Index out of bounds")
+        }
+    }
+}
+
+impl R2Vector2<char> {
+    pub fn get(&self, index: usize) -> Result<&str, &'static str> {
+        if index < self.len() {
+            self.get_unchecked(index)
+        } else {
+            Err("Index out of bounds")
+        }
+    }
+
+    pub fn set(&mut self, index: usize, value: &str, pc: &Pc) -> Result<(), &'static str> {
+        if index < self.len() {
+            self.set_unchecked(index, value, pc);
+            Ok(())
+        } else {
+            Err("Index out of bounds")
+        }
+    }
+
+    fn get_unchecked(&self, index: usize) -> Result<&str, &'static str> {
+        let sexp = unsafe { STRING_ELT(self.sexp(), index.try_into().unwrap()) };
+        let c_str = unsafe { CStr::from_ptr(R_CHAR(sexp) as *const c_char) };
+        c_str.to_str().map_err(|_| "Not valid UTF8")
+    }
+
+    fn set_unchecked(&mut self, index: usize, value: &str, pc: &Pc) {
+        let sexp = pc.protect(unsafe {
+            Rf_mkCharLenCE(
+                value.as_ptr() as *const c_char,
+                value.len().try_into().unwrap(),
+                cetype_t_CE_UTF8,
+            )
+        });
+        unsafe { SET_STRING_ELT(self.sexp(), index.try_into().unwrap(), sexp) };
+    }
+}
+
+impl RVectorConstructors<&str> for R2Vector2<char> {
+    #[allow(clippy::mut_from_ref)]
+    fn new(length: usize, pc: &Pc) -> &mut Self {
+        let sexp =
+            pc.protect(unsafe { Rf_allocVector(STRSXP, length.try_into().stop_str(TOO_LONG)) });
+        unsafe { &mut *sexp.cast::<R2Vector2<char>>() }
+    }
+
+    #[allow(clippy::mut_from_ref)]
+    fn from_value<'a>(value: &str, length: usize, pc: &'a Pc) -> &'a mut Self {
+        let length_i32 = length.try_into().stop_str(TOO_LONG);
+        let vec = pc.protect(unsafe { Rf_allocVector(STRSXP, length_i32) });
+        if length_i32 > 0 {
+            let element = pc.protect(unsafe {
+                Rf_mkCharLenCE(
+                    value.as_ptr() as *const c_char,
+                    value.len().try_into().unwrap(),
+                    cetype_t_CE_UTF8,
+                )
+            });
+            unsafe { SET_STRING_ELT(vec, 0, element) };
+            for index in 1..length_i32 {
+                unsafe { SET_STRING_ELT(vec, index, pc.protect(Rf_duplicate(element))) };
+            }
+        }
+        unsafe { &mut *vec.cast::<R2Vector2<char>>() }
+    }
+
+    #[allow(clippy::mut_from_ref)]
+    fn from_array<'a, const N: usize>(array: [&str; N], pc: &'a Pc) -> &'a mut Self {
+        let result = Self::new(array.len(), pc);
+        for (index, value) in array.iter().enumerate() {
+            result.set_unchecked(index, value, pc)
+        }
+        result
+    }
+
+    #[allow(clippy::mut_from_ref)]
+    fn from_slice<'a>(slice: &[&str], pc: &'a Pc) -> &'a mut Self {
+        let result = Self::new(slice.len(), pc);
+        for (index, value) in slice.iter().enumerate() {
+            result.set_unchecked(index, value, pc)
+        }
+        result
+    }
+}
+
 impl RObject<RVector, bool> {
     /// Get the value at a certain index in a logical RVector.
     pub fn get_bool(&self, index: usize) -> Result<bool, &'static str> {
@@ -1452,7 +1812,7 @@ impl RObject<RVector, RCharacter> {
     pub fn get<'a>(&self, index: usize) -> Result<&'a str, &'static str> {
         match self.get_engine(index, STRING_ELT) {
             Ok(sexp) => {
-                let c_str = unsafe { CStr::from_ptr(R_CHAR(Rf_asChar(sexp)) as *const c_char) };
+                let c_str = unsafe { CStr::from_ptr(R_CHAR(sexp) as *const c_char) };
                 c_str.to_str().map_err(|_| "Not valid UTF8")
             }
             Err(e) => Err(e),

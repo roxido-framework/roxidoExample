@@ -5,6 +5,42 @@ mod registration {
 use roxido::*;
 
 #[roxido]
+fn convolve4(a: &RObject<RVector, f64>, b: &RObject<RVector, f64>) {
+    let a = a.as_2vector2().stop_str("'a' should be a vector");
+    let b = b.as_2vector2().stop_str("'b' should be a vector");
+    let vec_3 = R2Vector2::<f64>::new(a.len() + b.len() - 1, pc);
+    let vec_3 = R2Vector2::<char>::new(a.len() + b.len() - 1, pc);
+    vec_3.set(4, "advid", pc);
+    let vec_4: &mut R2Vector2<f64> = R2Vector2::<f64>::new(a.len() + b.len() - 1, pc);
+    let vec = R2Vector2::from_value(0.0, a.len() + b.len() - 1, pc);
+    let vec = R2Vector2::from_value("String", a.len() + b.len() - 1, pc);
+    let vec2 = R2Vector2::from_value(0, a.len() + b.len() - 1, pc);
+    let vec2 = R2Vector2::from_value(false, a.len() + b.len() - 1, pc);
+    let vec2 = R2Vector2::from_array([false, true], pc);
+    let vec2 = R2Vector2::from_array(["David", "Lisa"], pc);
+    //let bob: () = vec2.get(0).stop();
+    let vec2 = R2Vector2::from_array([0.0, 1.0], pc);
+    let vec2 = R2Vector2::from_array([0_u8, 1], pc);
+    let vec2 = R2Vector2::from_array([0_i32, 2], pc);
+    let vec = R2Vector2::from_value(0.0, a.len() + b.len() - 1, pc);
+    let bob = vec2.get(0).stop();
+    macro_rules! rvec {
+        ($elem:expr; $n:expr) => {
+            R2Vector2::from_value($elem, $n, pc)
+        };
+    }
+    let bob = rvec![0.0; a.len() + b.len() - 1];
+    let bob2 = rvec![0; a.len() + b.len() - 1];
+    let ab = vec.slice_mut();
+    for (i, ai) in a.slice().iter().enumerate() {
+        for (j, bj) in b.slice().iter().enumerate() {
+            ab[i + j] += ai * bj;
+        }
+    }
+    vec.sexp()
+}
+
+#[roxido]
 fn convolve2(a: &RObject<RVector>, b: &RObject<RVector>) {
     let vec = RObject::<RVector, f64>::from_value(0.0, a.len() + b.len() - 1, pc);
     let ab = vec.slice_mut();
