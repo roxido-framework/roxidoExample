@@ -2045,7 +2045,7 @@ pub trait RVectorConstructors<T> {
 }
 
 macro_rules! r2vector2 {
-    ($tipe:ty, $code:expr, $ptr:expr, $get:expr, $set:expr) => {
+    ($tipe:ty, $code:expr, $ptr:expr, $set:expr) => {
         impl R2FromIterator2<$tipe> for R2Vector2<$tipe> {
             fn from_iter1<T>(iter: T, pc: &Pc) -> &mut Self
             where
@@ -2123,9 +2123,9 @@ macro_rules! r2vector2 {
     };
 }
 
-r2vector2!(f64, REALSXP, REAL, REAL_ELT, SET_REAL_ELT);
-r2vector2!(i32, INTSXP, INTEGER, INTEGER_ELT, SET_INTEGER_ELT);
-r2vector2!(u8, RAWSXP, RAW, RAW_ELT, SET_RAW_ELT);
+r2vector2!(f64, REALSXP, REAL, SET_REAL_ELT);
+r2vector2!(i32, INTSXP, INTEGER, SET_INTEGER_ELT);
+r2vector2!(u8, RAWSXP, RAW, SET_RAW_ELT);
 
 impl R2FromIterator2<bool> for R2Vector2<bool> {
     fn from_iter1<T>(iter: T, pc: &Pc) -> &mut Self
