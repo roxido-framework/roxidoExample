@@ -2022,12 +2022,12 @@ pub trait R2FromIterator2<T> {
         T: 'b;
 }
 
-pub trait RGetSet<T, I> {
+pub trait RGetSet<T: ?Sized, I> {
     /// Get the value at a certain index in an $tipe RVector.
-    fn get(&self, index: I) -> Result<T, &'static str>;
+    fn get(&self, index: I) -> Result<&T, &'static str>;
 
     /// Set the value at a certain index in an $tipe RVector.
-    fn set(&mut self, index: I, value: T) -> Result<(), &'static str>;
+    fn set(&mut self, index: I, value: &T) -> Result<(), &'static str>;
 }
 
 pub trait RVectorConstructors<T> {
@@ -2074,18 +2074,16 @@ macro_rules! r2vector2 {
 
         impl RGetSet<$tipe, usize> for R2Vector2<$tipe> {
             /// Get the value at a certain index in an $tipe RVector.
-            fn get(&self, index: usize) -> Result<$tipe, &'static str> {
-                if index < self.len() {
-                    Ok(unsafe { $get(self.sexp(), index.try_into().unwrap()) })
-                } else {
-                    Err("Index out of bounds")
-                }
+            fn get(&self, index: usize) -> Result<&$tipe, &'static str> {
+                self.slice()
+                    .get(usize::try_from(index).unwrap())
+                    .ok_or("Index out of bounds")
             }
 
             /// Set the value at a certain index in an $tipe RVector.
-            fn set(&mut self, index: usize, value: $tipe) -> Result<(), &'static str> {
+            fn set(&mut self, index: usize, value: &$tipe) -> Result<(), &'static str> {
                 if index < self.len() {
-                    unsafe { $set(self.sexp(), index.try_into().unwrap(), value) };
+                    unsafe { $set(self.sexp(), index.try_into().unwrap(), *value) };
                     Ok(())
                 } else {
                     Err("Index out of bounds")
@@ -2157,19 +2155,23 @@ impl R2FromIterator2<bool> for R2Vector2<bool> {
 
 impl RGetSet<bool, usize> for R2Vector2<bool> {
     /// Get the value at a certain index in an $tipe RVector.
-    fn get(&self, index: usize) -> Result<bool, &'static str> {
+    fn get(&self, index: usize) -> Result<&bool, &'static str> {
         if index < self.len() {
             let value = unsafe { LOGICAL_ELT(self.sexp(), index.try_into().unwrap()) };
-            Ok(value != Rboolean_FALSE as i32 && !R::is_na_bool(value))
+            if value != Rboolean_FALSE as i32 && !R::is_na_bool(value) {
+                Ok(&true)
+            } else {
+                Ok(&false)
+            }
         } else {
             Err("Index out of bounds")
         }
     }
 
     /// Set the value at a certain index in an $tipe RVector.
-    fn set(&mut self, index: usize, value: bool) -> Result<(), &'static str> {
+    fn set(&mut self, index: usize, value: &bool) -> Result<(), &'static str> {
         if index < self.len() {
-            let value = if value {
+            let value = if *value {
                 Rboolean_TRUE as i32
             } else {
                 Rboolean_FALSE as i32
@@ -2226,8 +2228,8 @@ impl RVectorConstructors<bool> for R2Vector2<bool> {
     }
 }
 
-impl R2Vector2<char> {
-    pub fn get(&self, index: usize) -> Result<&str, &'static str> {
+impl RGetSet<str, usize> for R2Vector2<char> {
+    fn get(&self, index: usize) -> Result<&str, &'static str> {
         if index < self.len() {
             self.get_unchecked(index)
         } else {
@@ -2235,29 +2237,32 @@ impl R2Vector2<char> {
         }
     }
 
-    pub fn set(&mut self, index: usize, value: &str, pc: &Pc) -> Result<(), &'static str> {
+    fn set(&mut self, index: usize, value: &str) -> Result<(), &'static str> {
         if index < self.len() {
-            self.set_unchecked(index, value, pc);
+            self.set_unchecked(index, value);
             Ok(())
         } else {
             Err("Index out of bounds")
         }
     }
+}
 
+impl R2Vector2<char> {
     fn get_unchecked(&self, index: usize) -> Result<&str, &'static str> {
         let sexp = unsafe { STRING_ELT(self.sexp(), index.try_into().unwrap()) };
         let c_str = unsafe { CStr::from_ptr(R_CHAR(sexp) as *const c_char) };
         c_str.to_str().map_err(|_| "Not valid UTF8")
     }
 
-    fn set_unchecked(&mut self, index: usize, value: &str, pc: &Pc) {
-        let sexp = pc.protect(unsafe {
+    fn set_unchecked(&mut self, index: usize, value: &str) {
+        let sexp = unsafe {
+            // Doesn't need protection because it's immediately set to a protected object.
             Rf_mkCharLenCE(
                 value.as_ptr() as *const c_char,
                 value.len().try_into().unwrap(),
                 cetype_t_CE_UTF8,
             )
-        });
+        };
         unsafe { SET_STRING_ELT(self.sexp(), index.try_into().unwrap(), sexp) };
     }
 }
@@ -2294,7 +2299,7 @@ impl RVectorConstructors<&str> for R2Vector2<char> {
     fn from_array<'a, const N: usize>(array: [&str; N], pc: &'a Pc) -> &'a mut Self {
         let result = Self::new(array.len(), pc);
         for (index, value) in array.iter().enumerate() {
-            result.set_unchecked(index, value, pc)
+            result.set_unchecked(index, value)
         }
         result
     }
@@ -2303,7 +2308,7 @@ impl RVectorConstructors<&str> for R2Vector2<char> {
     fn from_slice<'a>(slice: &[&str], pc: &'a Pc) -> &'a mut Self {
         let result = Self::new(slice.len(), pc);
         for (index, value) in slice.iter().enumerate() {
-            result.set_unchecked(index, value, pc)
+            result.set_unchecked(index, value)
         }
         result
     }
