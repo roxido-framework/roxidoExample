@@ -2022,12 +2022,12 @@ pub trait R2FromIterator2<T> {
         T: 'b;
 }
 
-pub trait R2OneDimensional2<T> {
+pub trait RGetSet<T, I> {
     /// Get the value at a certain index in an $tipe RVector.
-    fn get(&self, index: usize) -> Result<T, &'static str>;
+    fn get(&self, index: I) -> Result<T, &'static str>;
 
     /// Set the value at a certain index in an $tipe RVector.
-    fn set(&mut self, index: usize, value: T) -> Result<(), &'static str>;
+    fn set(&mut self, index: I, value: T) -> Result<(), &'static str>;
 }
 
 pub trait RVectorConstructors<T> {
@@ -2072,7 +2072,7 @@ macro_rules! r2vector2 {
             }
         }
 
-        impl R2OneDimensional2<$tipe> for R2Vector2<$tipe> {
+        impl RGetSet<$tipe, usize> for R2Vector2<$tipe> {
             /// Get the value at a certain index in an $tipe RVector.
             fn get(&self, index: usize) -> Result<$tipe, &'static str> {
                 if index < self.len() {
@@ -2155,7 +2155,7 @@ impl R2FromIterator2<bool> for R2Vector2<bool> {
     }
 }
 
-impl R2OneDimensional2<bool> for R2Vector2<bool> {
+impl RGetSet<bool, usize> for R2Vector2<bool> {
     /// Get the value at a certain index in an $tipe RVector.
     fn get(&self, index: usize) -> Result<bool, &'static str> {
         if index < self.len() {
