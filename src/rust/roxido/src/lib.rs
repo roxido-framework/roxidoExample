@@ -390,7 +390,7 @@ impl<RType, RMode> RObject<RType, RMode> {
     pub fn as_2scalar2(&self) -> Result<&R2Scalar2<RMode>, &'static str> {
         let s = self.as_2vector2()?;
         if s.is_scalar() {
-            Ok(unsafe { &*self.sexp().cast::<R2Scalar2<RMode>>() })
+            Ok(self.transmute())
         } else {
             Err("Not a vector")
         }
@@ -415,7 +415,7 @@ impl<RType, RMode> RObject<RType, RMode> {
 
     pub fn as_2vector2(&self) -> Result<&R2Vector2<RMode>, &'static str> {
         if self.is_vector() {
-            Ok(unsafe { &*self.sexp().cast::<R2Vector2<RMode>>() })
+            Ok(self.transmute())
         } else {
             Err("Not a vector")
         }
@@ -441,6 +441,16 @@ impl<RType, RMode> RObject<RType, RMode> {
 
     /// Check if appropriate to characterize as an `RObject<RMatrix>`.
     /// Checks using R's `Rf_isMatrix` function.
+    pub fn as_2matrix2(&self) -> Result<&R2Matrix2<RMode>, &'static str> {
+        if self.is_matrix() {
+            Ok(self.transmute())
+        } else {
+            Err("Not a matrix")
+        }
+    }
+
+    /// Check if appropriate to characterize as an `RObject<RMatrix>`.
+    /// Checks using R's `Rf_isMatrix` function.
     pub fn as_matrix_mut(&mut self) -> Result<&mut RObject<RMatrix, RMode>, &'static str> {
         if self.is_matrix() {
             Ok(self.transmute_mut())
@@ -452,6 +462,16 @@ impl<RType, RMode> RObject<RType, RMode> {
     /// Check if appropriate to characterize as an `RObject<RArray>`.
     /// Checks using R's `Rf_isArray` function.
     pub fn as_array(&self) -> Result<&RObject<RArray, RMode>, &'static str> {
+        if self.is_array() {
+            Ok(self.transmute())
+        } else {
+            Err("Not a vector")
+        }
+    }
+
+    /// Check if appropriate to characterize as an `RObject<RArray>`.
+    /// Checks using R's `Rf_isArray` function.
+    pub fn as_2array2(&self) -> Result<&R2Array2<RMode>, &'static str> {
         if self.is_array() {
             Ok(self.transmute())
         } else {
