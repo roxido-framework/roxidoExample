@@ -2075,9 +2075,10 @@ macro_rules! r2vector2 {
         impl RGetSet<$tipe, usize> for R2Vector2<$tipe> {
             /// Get the value at a certain index in an $tipe RVector.
             fn get(&self, index: usize) -> Result<&$tipe, &'static str> {
-                self.slice()
-                    .get(usize::try_from(index).unwrap())
-                    .ok_or("Index out of bounds")
+                match usize::try_from(index) {
+                    Ok(index) => self.slice().get(index).ok_or("Index out of bounds"),
+                    Err(_) => Err("Invalid index"),
+                }
             }
 
             /// Set the value at a certain index in an $tipe RVector.
