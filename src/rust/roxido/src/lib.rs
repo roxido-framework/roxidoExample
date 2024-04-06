@@ -1478,7 +1478,7 @@ impl<RMode> R2Scalar2<RMode> {
             unsafe { Rf_asInteger(self.sexp()) == R::na_i32() }
         } else if self.is_bool() {
             unsafe { Rf_asLogical(self.sexp()) == R::na_bool() }
-        } else if self.is_character() {
+        } else if self.is_char() {
             unsafe { Rf_asChar(self.sexp()) == R_NaString }
         } else {
             false
@@ -1922,8 +1922,8 @@ macro_rules! rconvertable {
             }
 
             /// Check if appropriate to characterize storage mode as "double".
-            pub fn as_character(&self) -> Result<&$name<RCharacter>, &'static str> {
-                if self.is_character() {
+            pub fn as_char(&self) -> Result<&$name<RCharacter>, &'static str> {
+                if self.is_char() {
                     Ok(self.transmute())
                 } else {
                     Err("Not of storage mode 'character'")
@@ -1931,8 +1931,8 @@ macro_rules! rconvertable {
             }
 
             /// Check if appropriate to characterize storage mode as "double".
-            pub fn as_character_mut(&mut self) -> Result<&mut $name<RCharacter>, &'static str> {
-                if self.is_character() {
+            pub fn as_char_mut(&mut self) -> Result<&mut $name<RCharacter>, &'static str> {
+                if self.is_char() {
                     Ok(self.transmute_mut())
                 } else {
                     Err("Not of storage mode 'character'")
@@ -1940,13 +1940,13 @@ macro_rules! rconvertable {
             }
 
             /// Checks to see if the data can be interpreted as R double.
-            pub fn is_character(&self) -> bool {
+            pub fn is_char(&self) -> bool {
                 unsafe { Rf_isString(self.sexp()) != 0 }
             }
 
             /// Attempts to coerce storage mode to "double".
             pub fn to_char<'a>(&'a self, pc: &'a Pc) -> &'a $name<RCharacter> {
-                if self.is_character() {
+                if self.is_char() {
                     self.transmute()
                 } else {
                     let sexp = pc.protect(unsafe { Rf_coerceVector(self.sexp(), STRSXP) });
@@ -1956,7 +1956,7 @@ macro_rules! rconvertable {
 
             /// Attempts to coerce storage mode to "double".
             pub fn to_char_mut(&mut self, pc: &Pc) -> &mut $name<RCharacter> {
-                if self.is_character() {
+                if self.is_char() {
                     self.transmute_mut()
                 } else {
                     let sexp = pc.protect(unsafe { Rf_coerceVector(self.sexp(), STRSXP) });
@@ -1969,6 +1969,8 @@ macro_rules! rconvertable {
 
 rconvertable!(R2Scalar2);
 rconvertable!(R2Vector2);
+rconvertable!(R2Matrix2);
+rconvertable!(R2Array2);
 
 pub trait RSliceable<T, T2> {
     fn slice(&self) -> &[T];
