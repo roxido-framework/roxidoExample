@@ -69,26 +69,11 @@ pub struct RObject<RType = RAnyType, RMode = RUnknown> {
     rtype: PhantomData<(RType, RMode)>,
 }
 
-#[repr(C)]
-pub struct R2Vector2<RMode = RUnknown> {
-    pub sexprec: SEXPREC,
-    rtype: PhantomData<RMode>,
-}
-
-#[repr(C)]
-pub struct R2Scalar2<RMode = RUnknown> {
-    pub sexprec: SEXPREC,
-    rtype: PhantomData<RMode>,
-}
-
 pub trait IsRObject {
     fn sexp(&self) -> SEXP {
         self as *const Self as SEXP
     }
 }
-
-impl<T> IsRObject for R2Scalar2<T> {}
-impl<T> IsRObject for R2Vector2<T> {}
 
 trait IsTransmutable {
     fn transmute<T: IsRObject>(&self) -> &T
@@ -106,8 +91,45 @@ trait IsTransmutable {
     }
 }
 
-impl<T> IsTransmutable for R2Scalar2<T> {}
-impl<T> IsTransmutable for R2Vector2<T> {}
+macro_rules! baseline {
+    ($name:ident) => {
+        #[repr(C)]
+        pub struct $name<RMode = RUnknown> {
+            pub sexprec: SEXPREC,
+            rtype: PhantomData<RMode>,
+        }
+        impl<T> IsRObject for $name<T> {}
+        impl<T> IsTransmutable for $name<T> {}
+    };
+}
+
+baseline!(R2Scalar2);
+baseline!(R2Vector2);
+baseline!(R2Matrix2);
+baseline!(R2Array2);
+
+pub trait R2HasLength2: IsRObject {
+    /// Returns the length of the RObject.
+    fn len(&self) -> usize {
+        let len = unsafe { Rf_xlength(self.sexp()) };
+        len.try_into().unwrap() // Won't ever fail if R is sane.
+    }
+
+    /// Checks to see if the RObject is empty.
+    fn is_empty(&self) -> bool {
+        unsafe { Rf_xlength(self.sexp()) == 0 }
+    }
+
+    /// Checks to see if the RObject is a scalar (has a length of 1).
+    fn is_scalar(&self) -> bool {
+        unsafe { Rf_xlength(self.sexp()) == 1 }
+    }
+}
+
+impl<T> R2HasLength2 for R2Scalar2<T> {}
+impl<T> R2HasLength2 for R2Vector2<T> {}
+impl<T> R2HasLength2 for R2Matrix2<T> {}
+impl<T> R2HasLength2 for R2Array2<T> {}
 
 pub struct Pc {
     counter: std::cell::RefCell<i32>,
@@ -140,27 +162,6 @@ pub struct RSymbol;
 pub struct RError;
 
 pub trait RHasLength {}
-
-pub trait R2HasLength2: IsRObject {
-    /// Returns the length of the RObject.
-    fn len(&self) -> usize {
-        let len = unsafe { Rf_xlength(self.sexp()) };
-        len.try_into().unwrap() // Won't ever fail if R is sane.
-    }
-
-    /// Checks to see if the RObject is empty.
-    fn is_empty(&self) -> bool {
-        unsafe { Rf_xlength(self.sexp()) == 0 }
-    }
-
-    /// Checks to see if the RObject is a scalar (has a length of 1).
-    fn is_scalar(&self) -> bool {
-        unsafe { Rf_xlength(self.sexp()) == 1 }
-    }
-}
-
-impl<T> R2HasLength2 for R2Scalar2<T> {}
-impl<T> R2HasLength2 for R2Vector2<T> {}
 
 impl RHasLength for RScalar {}
 impl RHasLength for RVector {}
@@ -334,19 +335,16 @@ impl<RType, RMode> RObject<RType, RMode> {
         self as *const RObject<RType, RMode> as SEXP
     }
 
-    fn transmute_sexp<RTypeTo, RModeTo>(&self, sexp: SEXP) -> &RObject<RTypeTo, RModeTo> {
-        unsafe { &*sexp.cast::<RObject<RTypeTo, RModeTo>>() }
+    fn transmute_sexp<T>(&self, sexp: SEXP) -> &T {
+        unsafe { &*sexp.cast::<T>() }
     }
 
-    fn transmute_sexp_mut<'a, RTypeTo, RModeTo>(
-        &mut self,
-        sexp: SEXP,
-    ) -> &'a mut RObject<RTypeTo, RModeTo> {
-        unsafe { &mut *sexp.cast::<RObject<RTypeTo, RModeTo>>() }
+    fn transmute_sexp_mut<'a, T>(&mut self, sexp: SEXP) -> &'a mut T {
+        unsafe { &mut *sexp.cast::<T>() }
     }
 
-    fn transmute<RTypeTo, RModeTo>(&self) -> &RObject<RTypeTo, RModeTo> {
-        unsafe { std::mem::transmute::<&Self, &RObject<RTypeTo, RModeTo>>(self) }
+    fn transmute<T>(&self) -> &T {
+        unsafe { std::mem::transmute::<&Self, &T>(self) }
     }
 
     fn transmute_mut<RTypeTo, RModeTo>(&mut self) -> &mut RObject<RTypeTo, RModeTo> {
@@ -976,8 +974,9 @@ impl<RType> RObject<RArray, RType> {
 
     /// Returns the dimensions of the RArray.
     pub fn dim(&self) -> Vec<usize> {
-        let d =
-            self.transmute_sexp::<RVector, i32>(unsafe { Rf_getAttrib(self.sexp(), R_DimSymbol) });
+        let d = self.transmute_sexp::<RObject<RVector, i32>>(unsafe {
+            Rf_getAttrib(self.sexp(), R_DimSymbol)
+        });
         d.slice().iter().map(|&x| x.try_into().unwrap()).collect()
     }
 
@@ -1609,7 +1608,9 @@ impl RObject<RScalar, RCharacter> {
 
     /// Get the value at a certain index in an $tipe RVector.
     pub fn get(&self) -> &str {
-        self.transmute::<RVector, RCharacter>().get(0).unwrap()
+        self.transmute::<RObject<RVector, RCharacter>>()
+            .get(0)
+            .unwrap()
     }
 
     /// Set the value at a certain index in an $tipe RVector.
@@ -2472,7 +2473,8 @@ macro_rules! rmatrix {
 
             /// Get the value at a certain index in a double RMatrix.
             pub fn get(&self, index: (usize, usize)) -> Result<$tipe2, &'static str> {
-                self.transmute::<RVector, $tipe>().get(self.index(index))
+                self.transmute::<RObject<RVector, $tipe>>()
+                    .get(self.index(index))
             }
 
             /// Set the value at a certain index in a double RMatrix.
@@ -2496,7 +2498,7 @@ rmatrix!(bool, i32, LGLSXP);
 impl RObject<RMatrix, bool> {
     /// Get the value at a certain index in a logical RMatrix as an i32.
     pub fn get_bool(&self, index: (usize, usize)) -> Result<bool, &'static str> {
-        self.transmute::<RVector, bool>()
+        self.transmute::<RObject<RVector, bool>>()
             .get_bool(self.index(index))
     }
 
@@ -2563,7 +2565,7 @@ impl RObject<RMatrix, RCharacter> {
 
     /// Get the value at a certain index in a character RMatrix.
     pub fn get(&self, index: (usize, usize)) -> Result<&str, &'static str> {
-        self.transmute::<RVector, RCharacter>()
+        self.transmute::<RObject<RVector, RCharacter>>()
             .get(self.index(index))
     }
 

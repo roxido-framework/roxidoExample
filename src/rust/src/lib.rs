@@ -11,8 +11,9 @@ fn convolve4(a: &RObject<RVector, f64>, b: &RObject<RVector, f64>) {
 
     let vec_3 = RObject::<RVector, f64>::from_value(5.0, a.len() + b.len() - 1, pc);
 
-    let vec_3 = R2Vector2::from_value(5.0, a.len() + b.len() - 1, pc);
+    let vec_3: R2Vector<f64> = R2Vector2::from_value(5.0, a.len() + b.len() - 1, pc);
     // let vec_3 = RVector::from_value(5.0, a.len() + b.len() - 1, pc);
+    let a = vec_3.get(3);
 
     let bob = ["David", "Dahl"].to_2r(pc);
     let bob = [false, true].to_2r(pc);
