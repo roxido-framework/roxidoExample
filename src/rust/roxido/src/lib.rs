@@ -1972,11 +1972,44 @@ rconvertable!(R2Vector2);
 rconvertable!(R2Matrix2);
 rconvertable!(R2Array2);
 
-pub trait RSliceable<T, T2> {
+pub trait RSliceable<T> {
     fn slice(&self) -> &[T];
 
     fn slice_mut(&mut self) -> &mut [T];
+}
 
+macro_rules! rsliceable {
+    ($name:ident, $tipe:ty, $tipe2:ty, $ptr:expr) => {
+        impl RSliceable<$tipe2> for $name<$tipe> {
+            fn slice(&self) -> &[$tipe2] {
+                unsafe { std::slice::from_raw_parts($ptr(self.sexp()), self.len()) }
+            }
+
+            fn slice_mut(&mut self) -> &mut [$tipe2] {
+                unsafe { std::slice::from_raw_parts_mut($ptr(self.sexp()), self.len()) }
+            }
+        }
+    };
+}
+
+rsliceable!(R2Scalar2, f64, f64, REAL);
+rsliceable!(R2Scalar2, i32, i32, INTEGER);
+rsliceable!(R2Scalar2, u8, u8, RAW);
+rsliceable!(R2Scalar2, bool, i32, LOGICAL);
+rsliceable!(R2Vector2, f64, f64, REAL);
+rsliceable!(R2Vector2, i32, i32, INTEGER);
+rsliceable!(R2Vector2, u8, u8, RAW);
+rsliceable!(R2Vector2, bool, i32, LOGICAL);
+rsliceable!(R2Matrix2, f64, f64, REAL);
+rsliceable!(R2Matrix2, i32, i32, INTEGER);
+rsliceable!(R2Matrix2, u8, u8, RAW);
+rsliceable!(R2Matrix2, bool, i32, LOGICAL);
+rsliceable!(R2Array2, f64, f64, REAL);
+rsliceable!(R2Array2, i32, i32, INTEGER);
+rsliceable!(R2Array2, u8, u8, RAW);
+rsliceable!(R2Array2, bool, i32, LOGICAL);
+
+pub trait R2OneDimensional2<T, T2> {
     #[allow(clippy::mut_from_ref)]
     fn from_iter1<S>(iter: S, pc: &Pc) -> &mut Self
     where
@@ -2011,15 +2044,7 @@ pub trait RVectorConstructors<T> {
 
 macro_rules! r2vector2 {
     ($tipe:ty, $code:expr, $ptr:expr, $get:expr, $set:expr) => {
-        impl RSliceable<$tipe, $tipe> for R2Vector2<$tipe> {
-            fn slice(&self) -> &[$tipe] {
-                unsafe { std::slice::from_raw_parts($ptr(self.sexp()), self.len()) }
-            }
-
-            fn slice_mut(&mut self) -> &mut [$tipe] {
-                unsafe { std::slice::from_raw_parts_mut($ptr(self.sexp()), self.len()) }
-            }
-
+        impl R2OneDimensional2<$tipe, $tipe> for R2Vector2<$tipe> {
             fn from_iter1<T>(iter: T, pc: &Pc) -> &mut Self
             where
                 T: IntoIterator<Item = $tipe> + ExactSizeIterator,
@@ -2100,15 +2125,7 @@ r2vector2!(f64, REALSXP, REAL, REAL_ELT, SET_REAL_ELT);
 r2vector2!(i32, INTSXP, INTEGER, INTEGER_ELT, SET_INTEGER_ELT);
 r2vector2!(u8, RAWSXP, RAW, RAW_ELT, SET_RAW_ELT);
 
-impl RSliceable<i32, bool> for R2Vector2<bool> {
-    fn slice(&self) -> &[i32] {
-        unsafe { std::slice::from_raw_parts(LOGICAL(self.sexp()), self.len()) }
-    }
-
-    fn slice_mut(&mut self) -> &mut [i32] {
-        unsafe { std::slice::from_raw_parts_mut(LOGICAL(self.sexp()), self.len()) }
-    }
-
+impl R2OneDimensional2<i32, bool> for R2Vector2<bool> {
     fn from_iter1<T>(iter: T, pc: &Pc) -> &mut Self
     where
         T: IntoIterator<Item = bool> + ExactSizeIterator,
