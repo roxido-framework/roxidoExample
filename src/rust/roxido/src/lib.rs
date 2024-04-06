@@ -2009,23 +2009,25 @@ rsliceable!(R2Array2, i32, i32, INTEGER);
 rsliceable!(R2Array2, u8, u8, RAW);
 rsliceable!(R2Array2, bool, i32, LOGICAL);
 
-pub trait R2OneDimensional2<T, T2> {
+pub trait R2FromIterator2<T> {
     #[allow(clippy::mut_from_ref)]
     fn from_iter1<S>(iter: S, pc: &Pc) -> &mut Self
     where
-        S: IntoIterator<Item = T2> + ExactSizeIterator;
+        S: IntoIterator<Item = T> + ExactSizeIterator;
 
     #[allow(clippy::mut_from_ref)]
     fn from_iter2<'a, 'b, S>(iter: S, pc: &'a Pc) -> &'a mut Self
     where
-        S: IntoIterator<Item = &'b T2> + ExactSizeIterator,
-        T2: 'b;
+        S: IntoIterator<Item = &'b T> + ExactSizeIterator,
+        T: 'b;
+}
 
+pub trait R2OneDimensional2<T> {
     /// Get the value at a certain index in an $tipe RVector.
-    fn get(&self, index: usize) -> Result<T2, &'static str>;
+    fn get(&self, index: usize) -> Result<T, &'static str>;
 
     /// Set the value at a certain index in an $tipe RVector.
-    fn set(&mut self, index: usize, value: T2) -> Result<(), &'static str>;
+    fn set(&mut self, index: usize, value: T) -> Result<(), &'static str>;
 }
 
 pub trait RVectorConstructors<T> {
@@ -2044,7 +2046,7 @@ pub trait RVectorConstructors<T> {
 
 macro_rules! r2vector2 {
     ($tipe:ty, $code:expr, $ptr:expr, $get:expr, $set:expr) => {
-        impl R2OneDimensional2<$tipe, $tipe> for R2Vector2<$tipe> {
+        impl R2FromIterator2<$tipe> for R2Vector2<$tipe> {
             fn from_iter1<T>(iter: T, pc: &Pc) -> &mut Self
             where
                 T: IntoIterator<Item = $tipe> + ExactSizeIterator,
@@ -2068,7 +2070,9 @@ macro_rules! r2vector2 {
                 }
                 result
             }
+        }
 
+        impl R2OneDimensional2<$tipe> for R2Vector2<$tipe> {
             /// Get the value at a certain index in an $tipe RVector.
             fn get(&self, index: usize) -> Result<$tipe, &'static str> {
                 if index < self.len() {
@@ -2125,7 +2129,7 @@ r2vector2!(f64, REALSXP, REAL, REAL_ELT, SET_REAL_ELT);
 r2vector2!(i32, INTSXP, INTEGER, INTEGER_ELT, SET_INTEGER_ELT);
 r2vector2!(u8, RAWSXP, RAW, RAW_ELT, SET_RAW_ELT);
 
-impl R2OneDimensional2<i32, bool> for R2Vector2<bool> {
+impl R2FromIterator2<bool> for R2Vector2<bool> {
     fn from_iter1<T>(iter: T, pc: &Pc) -> &mut Self
     where
         T: IntoIterator<Item = bool> + ExactSizeIterator,
@@ -2149,6 +2153,9 @@ impl R2OneDimensional2<i32, bool> for R2Vector2<bool> {
         }
         result
     }
+}
+
+impl R2OneDimensional2<bool> for R2Vector2<bool> {
     /// Get the value at a certain index in an $tipe RVector.
     fn get(&self, index: usize) -> Result<bool, &'static str> {
         if index < self.len() {
