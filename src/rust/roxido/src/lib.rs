@@ -54,6 +54,54 @@ pub use roxido_macro::roxido;
 
 pub use rbindings::SEXP;
 
+pub trait SexpMethods {
+    fn as_str<'a>(&self) -> Result<&'a str, &'static str>;
+
+    fn from_str(x: &str, pc: &Pc) -> Self;
+
+    /// # Safety
+    /// Expert use only.
+    unsafe fn transmute<T>(self, _pc: &Pc) -> &T;
+
+    /// # Safety
+    /// Expert use only.
+    #[allow(clippy::mut_from_ref)]
+    unsafe fn transmute_mut<T>(self, _pc: &Pc) -> &mut T;
+
+    /// # Safety
+    /// Expert use only.
+    unsafe fn transmute_static<T>(self) -> &'static T;
+}
+
+impl SexpMethods for SEXP {
+    fn as_str<'a>(&self) -> Result<&'a str, &'static str> {
+        let c_str = unsafe { CStr::from_ptr(R_CHAR(*self) as *const c_char) };
+        c_str.to_str().map_err(|_| "Not valid UTF8")
+    }
+
+    fn from_str(x: &str, pc: &Pc) -> Self {
+        pc.protect(unsafe {
+            Rf_mkCharLenCE(
+                x.as_ptr() as *const c_char,
+                x.len().try_into().stop_str(TOO_LONG),
+                cetype_t_CE_UTF8,
+            )
+        })
+    }
+
+    unsafe fn transmute<T>(self, _pc: &Pc) -> &T {
+        unsafe { &*self.cast::<T>() }
+    }
+
+    unsafe fn transmute_mut<T>(self, _pc: &Pc) -> &mut T {
+        unsafe { &mut *self.cast::<T>() }
+    }
+
+    unsafe fn transmute_static<T>(self) -> &'static T {
+        unsafe { &*self.cast::<T>() }
+    }
+}
+
 use rbindings::*;
 use std::collections::HashMap;
 use std::ffi::{c_char, c_void, CStr};
@@ -76,14 +124,18 @@ pub trait IsRObject {
 }
 
 trait IsTransmutable {
-    fn transmute<T: IsRObject>(&self) -> &T
+    /// # Safety
+    /// Expert use only.
+    unsafe fn transmute<T: IsRObject>(&self) -> &T
     where
         Self: Sized,
     {
         unsafe { std::mem::transmute::<&Self, &T>(self) }
     }
 
-    fn transmute_mut<T: IsRObject>(&mut self) -> &mut T
+    /// # Safety
+    /// Expert use only.
+    unsafe fn transmute_mut<T: IsRObject>(&mut self) -> &mut T
     where
         Self: Sized,
     {
@@ -214,27 +266,18 @@ impl Pc {
         sexp
     }
 
-    /// This is an implementation detail and *should not* be called directly!
-    #[doc(hidden)]
-    pub fn __private_transmute_sexp<T>(&self, sexp: SEXP) -> &T {
-        unsafe { &*sexp.cast::<T>() }
-    }
-
-    /// This is an implementation detail and *should not* be called directly!
-    #[doc(hidden)]
-    pub fn __private_transmute_sexp_mut<'a, T>(&self, sexp: SEXP) -> &'a mut T {
+    #[allow(clippy::not_unsafe_ptr_arg_deref)]
+    #[allow(clippy::mut_from_ref)]
+    pub fn protect_and_transmute<T>(&self, sexp: SEXP) -> &mut T {
+        let sexp = self.protect(sexp);
         unsafe { &mut *sexp.cast::<T>() }
-    }
-
-    fn transmute_sexp_static<T>(sexp: SEXP) -> &'static T {
-        unsafe { &*sexp.cast::<T>() }
     }
 }
 
 impl R {
     /// Returns an R NULL value.
     pub fn null() -> &'static RObject {
-        Pc::transmute_sexp_static(unsafe { R_NilValue })
+        unsafe { R_NilValue.transmute_static() }
     }
 
     /// Returns an R NA value for storage mode "double".
@@ -280,6 +323,18 @@ impl R {
     /// Checks if a bool can be interpreted as an R NA value.
     pub fn is_na_bool(x: i32) -> bool {
         x == unsafe { R_NaInt }
+    }
+
+    pub fn is_true(x: i32) -> bool {
+        x != Rboolean_FALSE.try_into().unwrap() && !Self::is_na_bool(x)
+    }
+
+    pub fn as_logical(x: bool) -> i32 {
+        if x {
+            Rboolean_TRUE.try_into().unwrap()
+        } else {
+            Rboolean_FALSE.try_into().unwrap()
+        }
     }
 
     /// Checks if an f64 can be interpreted as an R NaN value.
@@ -359,8 +414,7 @@ impl<RType, RMode> RObject<RType, RMode> {
     ///
     #[allow(clippy::mut_from_ref)]
     pub fn clone<'a>(&self, pc: &'a Pc) -> &'a mut RObject<RType, RMode> {
-        let sexp = pc.protect(unsafe { Rf_duplicate(self.sexp()) });
-        pc.__private_transmute_sexp_mut(sexp)
+        pc.protect_and_transmute(unsafe { Rf_duplicate(self.sexp()) })
     }
 
     /// Recharacterize an RObject<RType, RMode> as an RObject (i.e., an RObject<RAnyType, RUnknown>).
@@ -682,33 +736,32 @@ impl RObject<RSymbol> {
                 cetype_t_CE_UTF8,
             )
         });
-        let sexp = pc.protect(unsafe { Rf_installChar(sexp) });
-        pc.__private_transmute_sexp_mut(sexp)
+        pc.protect_and_transmute(unsafe { Rf_installChar(sexp) })
     }
 
     /// Get R's "dim" symbol.
     pub fn dim() -> &'static Self {
-        Pc::transmute_sexp_static(unsafe { R_DimSymbol })
+        unsafe { R_DimSymbol.transmute_static() }
     }
 
     /// Get R's "names" symbol.
     pub fn names() -> &'static Self {
-        Pc::transmute_sexp_static(unsafe { R_NamesSymbol })
+        unsafe { R_NamesSymbol.transmute_static() }
     }
 
     /// Get R's "rownames" symbol.
     pub fn rownames() -> &'static Self {
-        Pc::transmute_sexp_static(unsafe { R_RowNamesSymbol })
+        unsafe { R_RowNamesSymbol.transmute_static() }
     }
 
     /// Get R's "dimnames" symbol.
     pub fn dimnames() -> &'static Self {
-        Pc::transmute_sexp_static(unsafe { R_DimNamesSymbol })
+        unsafe { R_DimNamesSymbol.transmute_static() }
     }
 
     /// Get R's "class" symbol.
     pub fn class() -> &'static Self {
-        Pc::transmute_sexp_static(unsafe { R_ClassSymbol })
+        unsafe { R_ClassSymbol.transmute_static() }
     }
 }
 
@@ -767,18 +820,16 @@ impl<RType: RAtomic + RHasLength, RMode> RObject<RType, RMode> {
         if self.is_f64() {
             self.transmute()
         } else {
-            let sexp = pc.protect(unsafe { Rf_coerceVector(self.sexp(), REALSXP) });
-            pc.__private_transmute_sexp(sexp)
+            pc.protect_and_transmute(unsafe { Rf_coerceVector(self.sexp(), REALSXP) })
         }
     }
 
     /// Attempts to coerce storage mode to "double".
-    pub fn to_f64_mut(&mut self, pc: &Pc) -> &mut RObject<RType, f64> {
+    pub fn to_f64_mut<'a>(&'a mut self, pc: &'a Pc) -> &'a mut RObject<RType, f64> {
         if self.is_f64() {
             self.transmute_mut()
         } else {
-            let sexp = pc.protect(unsafe { Rf_coerceVector(self.sexp(), REALSXP) });
-            pc.__private_transmute_sexp_mut(sexp)
+            pc.protect_and_transmute(unsafe { Rf_coerceVector(self.sexp(), REALSXP) })
         }
     }
 
@@ -810,18 +861,16 @@ impl<RType: RAtomic + RHasLength, RMode> RObject<RType, RMode> {
         if self.is_i32() {
             self.transmute()
         } else {
-            let sexp = pc.protect(unsafe { Rf_coerceVector(self.sexp(), INTSXP) });
-            pc.__private_transmute_sexp(sexp)
+            pc.protect_and_transmute(unsafe { Rf_coerceVector(self.sexp(), INTSXP) })
         }
     }
 
     /// Attempts to coerce storage mode to "double".
-    pub fn to_i32_mut(&mut self, pc: &Pc) -> &mut RObject<RType, i32> {
+    pub fn to_i32_mut<'a>(&'a mut self, pc: &'a Pc) -> &'a mut RObject<RType, i32> {
         if self.is_i32() {
             self.transmute_mut()
         } else {
-            let sexp = pc.protect(unsafe { Rf_coerceVector(self.sexp(), INTSXP) });
-            pc.__private_transmute_sexp_mut(sexp)
+            pc.protect_and_transmute(unsafe { Rf_coerceVector(self.sexp(), INTSXP) })
         }
     }
 
@@ -853,18 +902,16 @@ impl<RType: RAtomic + RHasLength, RMode> RObject<RType, RMode> {
         if self.is_u8() {
             self.transmute()
         } else {
-            let sexp = pc.protect(unsafe { Rf_coerceVector(self.sexp(), RAWSXP) });
-            pc.__private_transmute_sexp(sexp)
+            pc.protect_and_transmute(unsafe { Rf_coerceVector(self.sexp(), RAWSXP) })
         }
     }
 
     /// Attempts to coerce storage mode to "double".
-    pub fn to_u8_mut(&mut self, pc: &Pc) -> &mut RObject<RType, u8> {
+    pub fn to_u8_mut<'a>(&'a mut self, pc: &'a Pc) -> &'a mut RObject<RType, u8> {
         if self.is_u8() {
             self.transmute_mut()
         } else {
-            let sexp = pc.protect(unsafe { Rf_coerceVector(self.sexp(), RAWSXP) });
-            pc.__private_transmute_sexp_mut(sexp)
+            pc.protect_and_transmute(unsafe { Rf_coerceVector(self.sexp(), RAWSXP) })
         }
     }
 
@@ -896,18 +943,16 @@ impl<RType: RAtomic + RHasLength, RMode> RObject<RType, RMode> {
         if self.is_bool() {
             self.transmute()
         } else {
-            let sexp = pc.protect(unsafe { Rf_coerceVector(self.sexp(), LGLSXP) });
-            pc.__private_transmute_sexp(sexp)
+            pc.protect_and_transmute(unsafe { Rf_coerceVector(self.sexp(), LGLSXP) })
         }
     }
 
     /// Attempts to coerce storage mode to "double".
-    pub fn to_bool_mut(&mut self, pc: &Pc) -> &mut RObject<RType, bool> {
+    pub fn to_bool_mut<'a>(&'a mut self, pc: &'a Pc) -> &'a mut RObject<RType, bool> {
         if self.is_bool() {
             self.transmute_mut()
         } else {
-            let sexp = pc.protect(unsafe { Rf_coerceVector(self.sexp(), LGLSXP) });
-            pc.__private_transmute_sexp_mut(sexp)
+            pc.protect_and_transmute(unsafe { Rf_coerceVector(self.sexp(), LGLSXP) })
         }
     }
 
@@ -939,18 +984,16 @@ impl<RType: RAtomic + RHasLength, RMode> RObject<RType, RMode> {
         if self.is_character() {
             self.transmute()
         } else {
-            let sexp = pc.protect(unsafe { Rf_coerceVector(self.sexp(), STRSXP) });
-            pc.__private_transmute_sexp(sexp)
+            pc.protect_and_transmute(unsafe { Rf_coerceVector(self.sexp(), STRSXP) })
         }
     }
 
     /// Attempts to coerce storage mode to "double".
-    pub fn to_character_mut(&mut self, pc: &Pc) -> &mut RObject<RType, RCharacter> {
+    pub fn to_character_mut<'a>(&'a mut self, pc: &'a Pc) -> &'a mut RObject<RType, RCharacter> {
         if self.is_character() {
             self.transmute_mut()
         } else {
-            let sexp = pc.protect(unsafe { Rf_coerceVector(self.sexp(), STRSXP) });
-            pc.__private_transmute_sexp_mut(sexp)
+            pc.protect_and_transmute(unsafe { Rf_coerceVector(self.sexp(), STRSXP) })
         }
     }
 }
@@ -958,9 +1001,9 @@ impl<RType: RAtomic + RHasLength, RMode> RObject<RType, RMode> {
 impl<RMode> RObject<RVector, RMode> {
     #[allow(clippy::mut_from_ref)]
     fn new_engine(code: u32, length: usize, pc: &Pc) -> &mut Self {
-        let sexp =
-            pc.protect(unsafe { Rf_allocVector(code, length.try_into().stop_str(TOO_LONG)) });
-        pc.__private_transmute_sexp_mut(sexp)
+        pc.protect_and_transmute(unsafe {
+            Rf_allocVector(code, length.try_into().stop_str(TOO_LONG))
+        })
     }
 }
 
@@ -989,7 +1032,7 @@ impl<RType> RObject<RArray, RType> {
     #[allow(clippy::mut_from_ref)]
     fn new_engine<'a>(code: u32, dim: &[usize], pc: &'a Pc) -> &'a mut RObject<RArray, RType> {
         let d = dim.to_r(pc);
-        pc.__private_transmute_sexp_mut(pc.protect(unsafe { Rf_allocArray(code, d.sexp()) }))
+        pc.protect_and_transmute(unsafe { Rf_allocArray(code, d.sexp()) })
     }
 
     /// Returns the dimensions of the RArray.
@@ -1032,7 +1075,7 @@ impl RObject<RFunction> {
             R_tryEval(expression, R_GetCurrentEnv(), &mut p_out_error as *mut i32)
         });
         match p_out_error {
-            0 => Ok(pc.__private_transmute_sexp(sexp)),
+            0 => Ok(unsafe { sexp.transmute(pc) }),
             e => Err(e),
         }
     }
@@ -1466,7 +1509,7 @@ impl<RMode> R2Scalar2<RMode> {
 
     /// Check if appropriate to characterize as a str reference.
     pub fn str<'a>(&'a self, pc: &'a Pc) -> &'a str {
-        let s: &R2Vector2<char> = self.to_char(pc).transmute();
+        let s: &R2Vector2<char> = unsafe { self.to_char(pc).transmute() }; // DBD
         s.get(0).unwrap()
     }
 
@@ -1529,7 +1572,7 @@ macro_rules! r2scalar2 {
         impl RScalarConstructor<$tipe> for R2Scalar2<$tipe> {
             #[allow(clippy::mut_from_ref)]
             fn from_value(value: $tipe, pc: &Pc) -> &mut Self {
-                pc.__private_transmute_sexp_mut(pc.protect(unsafe { $code(value) }))
+                pc.protect_and_transmute(unsafe { $code(value) })
             }
         }
     };
@@ -1542,26 +1585,26 @@ r2scalar2!(u8, Rf_ScalarRaw);
 impl RScalarConstructor<bool> for R2Scalar2<bool> {
     #[allow(clippy::mut_from_ref)]
     fn from_value(value: bool, pc: &Pc) -> &mut Self {
-        pc.__private_transmute_sexp_mut(pc.protect(unsafe {
+        pc.protect_and_transmute(unsafe {
             Rf_ScalarLogical(if value {
                 Rboolean_TRUE as i32
             } else {
                 Rboolean_FALSE as i32
             })
-        }))
+        })
     }
 }
 
 impl RScalarConstructor<&str> for R2Scalar2<char> {
     #[allow(clippy::mut_from_ref)]
     fn from_value<'a>(value: &str, pc: &'a Pc) -> &'a mut Self {
-        pc.__private_transmute_sexp_mut(pc.protect(unsafe {
+        pc.protect_and_transmute(unsafe {
             Rf_ScalarString(pc.protect(Rf_mkCharLenCE(
                 value.as_ptr() as *const c_char,
                 value.len().try_into().stop_str(TOO_LONG),
                 cetype_t_CE_UTF8,
             )))
-        }))
+        })
     }
 }
 
@@ -1570,7 +1613,7 @@ macro_rules! rscalar {
         impl RObject<RScalar, $tipe> {
             #[allow(clippy::mut_from_ref)]
             pub fn from_value(value: $tipe2, pc: &Pc) -> &mut Self {
-                pc.__private_transmute_sexp_mut(pc.protect(unsafe { $code(value) }))
+                pc.protect_and_transmute(unsafe { $code(value) })
             }
 
             /// Get the value at a certain index in an $tipe RVector.
@@ -1623,7 +1666,7 @@ impl RObject<RScalar, RCharacter> {
                 cetype_t_CE_UTF8,
             ))
         };
-        pc.__private_transmute_sexp_mut(pc.protect(sexp))
+        pc.protect_and_transmute(sexp)
     }
 
     /// Get the value at a certain index in an $tipe RVector.
@@ -1752,7 +1795,7 @@ macro_rules! rconvertable {
             /// Check if appropriate to characterize storage mode as "double".
             pub fn as_f64(&self) -> Result<&$name<f64>, &'static str> {
                 if self.is_f64() {
-                    Ok(self.transmute())
+                    Ok(unsafe { self.transmute() })
                 } else {
                     Err("Not of storage mode 'double'")
                 }
@@ -1761,7 +1804,7 @@ macro_rules! rconvertable {
             /// Check if appropriate to characterize storage mode as "double".
             pub fn as_f64_mut(&mut self) -> Result<&mut $name<f64>, &'static str> {
                 if self.is_f64() {
-                    Ok(self.transmute_mut())
+                    Ok(unsafe { self.transmute_mut() })
                 } else {
                     Err("Not of storage mode 'double'")
                 }
@@ -1775,27 +1818,25 @@ macro_rules! rconvertable {
             /// Attempts to coerce storage mode to "double".
             pub fn to_f64<'a>(&'a self, pc: &'a Pc) -> &'a $name<f64> {
                 if self.is_f64() {
-                    self.transmute()
+                    unsafe { self.transmute() }
                 } else {
-                    let sexp = pc.protect(unsafe { Rf_coerceVector(self.sexp(), REALSXP) });
-                    pc.__private_transmute_sexp(sexp)
+                    pc.protect_and_transmute(unsafe { Rf_coerceVector(self.sexp(), REALSXP) })
                 }
             }
 
             /// Attempts to coerce storage mode to "double".
-            pub fn to_f64_mut(&mut self, pc: &Pc) -> &mut $name<f64> {
+            pub fn to_f64_mut<'a>(&'a mut self, pc: &'a Pc) -> &'a mut $name<f64> {
                 if self.is_f64() {
-                    self.transmute_mut()
+                    unsafe { self.transmute_mut() }
                 } else {
-                    let sexp = pc.protect(unsafe { Rf_coerceVector(self.sexp(), REALSXP) });
-                    pc.__private_transmute_sexp_mut(sexp)
+                    pc.protect_and_transmute(unsafe { Rf_coerceVector(self.sexp(), REALSXP) })
                 }
             }
 
             /// Check if appropriate to characterize storage mode as "double".
             pub fn as_i32(&self) -> Result<&$name<i32>, &'static str> {
                 if self.is_i32() {
-                    Ok(self.transmute())
+                    Ok(unsafe { self.transmute() })
                 } else {
                     Err("Not of storage mode 'integer'")
                 }
@@ -1804,7 +1845,7 @@ macro_rules! rconvertable {
             /// Check if appropriate to characterize storage mode as "double".
             pub fn as_i32_mut(&mut self) -> Result<&mut $name<i32>, &'static str> {
                 if self.is_i32() {
-                    Ok(self.transmute_mut())
+                    Ok(unsafe { self.transmute_mut() })
                 } else {
                     Err("Not of storage mode 'integer'")
                 }
@@ -1818,27 +1859,25 @@ macro_rules! rconvertable {
             /// Attempts to coerce storage mode to "double".
             pub fn to_i32<'a>(&'a self, pc: &'a Pc) -> &'a $name<i32> {
                 if self.is_i32() {
-                    self.transmute()
+                    unsafe { self.transmute() }
                 } else {
-                    let sexp = pc.protect(unsafe { Rf_coerceVector(self.sexp(), INTSXP) });
-                    pc.__private_transmute_sexp(sexp)
+                    pc.protect_and_transmute(unsafe { Rf_coerceVector(self.sexp(), INTSXP) })
                 }
             }
 
             /// Attempts to coerce storage mode to "double".
-            pub fn to_i32_mut(&mut self, pc: &Pc) -> &mut $name<i32> {
+            pub fn to_i32_mut<'a>(&'a mut self, pc: &'a Pc) -> &'a mut $name<i32> {
                 if self.is_i32() {
-                    self.transmute_mut()
+                    unsafe { self.transmute_mut() }
                 } else {
-                    let sexp = pc.protect(unsafe { Rf_coerceVector(self.sexp(), INTSXP) });
-                    pc.__private_transmute_sexp_mut(sexp)
+                    pc.protect_and_transmute(unsafe { Rf_coerceVector(self.sexp(), INTSXP) })
                 }
             }
 
             /// Check if appropriate to characterize storage mode as "double".
             pub fn as_u8(&self) -> Result<&$name<u8>, &'static str> {
                 if self.is_u8() {
-                    Ok(self.transmute())
+                    Ok(unsafe { self.transmute() })
                 } else {
                     Err("Not of storage mode 'raw'")
                 }
@@ -1847,7 +1886,7 @@ macro_rules! rconvertable {
             /// Check if appropriate to characterize storage mode as "double".
             pub fn as_u8_mut(&mut self) -> Result<&mut $name<u8>, &'static str> {
                 if self.is_u8() {
-                    Ok(self.transmute_mut())
+                    Ok(unsafe { self.transmute_mut() })
                 } else {
                     Err("Not of storage mode 'raw'")
                 }
@@ -1861,27 +1900,25 @@ macro_rules! rconvertable {
             /// Attempts to coerce storage mode to "double".
             pub fn to_u8<'a>(&'a self, pc: &'a Pc) -> &'a $name<u8> {
                 if self.is_u8() {
-                    self.transmute()
+                    unsafe { self.transmute() }
                 } else {
-                    let sexp = pc.protect(unsafe { Rf_coerceVector(self.sexp(), RAWSXP) });
-                    pc.__private_transmute_sexp(sexp)
+                    pc.protect_and_transmute(unsafe { Rf_coerceVector(self.sexp(), RAWSXP) })
                 }
             }
 
             /// Attempts to coerce storage mode to "double".
-            pub fn to_u8_mut(&mut self, pc: &Pc) -> &mut $name<u8> {
+            pub fn to_u8_mut<'a>(&'a mut self, pc: &'a Pc) -> &'a mut $name<u8> {
                 if self.is_u8() {
-                    self.transmute_mut()
+                    unsafe { self.transmute_mut() }
                 } else {
-                    let sexp = pc.protect(unsafe { Rf_coerceVector(self.sexp(), RAWSXP) });
-                    pc.__private_transmute_sexp_mut(sexp)
+                    pc.protect_and_transmute(unsafe { Rf_coerceVector(self.sexp(), RAWSXP) })
                 }
             }
 
             /// Check if appropriate to characterize storage mode as "double".
             pub fn as_bool(&self) -> Result<&$name<bool>, &'static str> {
                 if self.is_bool() {
-                    Ok(self.transmute())
+                    Ok(unsafe { self.transmute() })
                 } else {
                     Err("Not of storage mode 'logical'")
                 }
@@ -1890,7 +1927,7 @@ macro_rules! rconvertable {
             /// Check if appropriate to characterize storage mode as "double".
             pub fn as_bool_mut(&mut self) -> Result<&mut $name<bool>, &'static str> {
                 if self.is_bool() {
-                    Ok(self.transmute_mut())
+                    Ok(unsafe { self.transmute_mut() })
                 } else {
                     Err("Not of storage mode 'logical'")
                 }
@@ -1904,36 +1941,34 @@ macro_rules! rconvertable {
             /// Attempts to coerce storage mode to "double".
             pub fn to_bool<'a>(&'a self, pc: &'a Pc) -> &'a $name<bool> {
                 if self.is_bool() {
-                    self.transmute()
+                    unsafe { self.transmute() }
                 } else {
-                    let sexp = pc.protect(unsafe { Rf_coerceVector(self.sexp(), LGLSXP) });
-                    pc.__private_transmute_sexp(sexp)
+                    pc.protect_and_transmute(unsafe { Rf_coerceVector(self.sexp(), LGLSXP) })
                 }
             }
 
             /// Attempts to coerce storage mode to "double".
-            pub fn to_bool_mut(&mut self, pc: &Pc) -> &mut $name<bool> {
+            pub fn to_bool_mut<'a>(&'a mut self, pc: &'a Pc) -> &'a mut $name<bool> {
                 if self.is_bool() {
-                    self.transmute_mut()
+                    unsafe { self.transmute_mut() }
                 } else {
-                    let sexp = pc.protect(unsafe { Rf_coerceVector(self.sexp(), LGLSXP) });
-                    pc.__private_transmute_sexp_mut(sexp)
+                    pc.protect_and_transmute(unsafe { Rf_coerceVector(self.sexp(), LGLSXP) })
                 }
             }
 
             /// Check if appropriate to characterize storage mode as "double".
-            pub fn as_char(&self) -> Result<&$name<RCharacter>, &'static str> {
+            pub fn as_char(&self) -> Result<&$name<char>, &'static str> {
                 if self.is_char() {
-                    Ok(self.transmute())
+                    Ok(unsafe { self.transmute() })
                 } else {
                     Err("Not of storage mode 'character'")
                 }
             }
 
             /// Check if appropriate to characterize storage mode as "double".
-            pub fn as_char_mut(&mut self) -> Result<&mut $name<RCharacter>, &'static str> {
+            pub fn as_char_mut(&mut self) -> Result<&mut $name<char>, &'static str> {
                 if self.is_char() {
-                    Ok(self.transmute_mut())
+                    Ok(unsafe { self.transmute_mut() })
                 } else {
                     Err("Not of storage mode 'character'")
                 }
@@ -1945,22 +1980,20 @@ macro_rules! rconvertable {
             }
 
             /// Attempts to coerce storage mode to "double".
-            pub fn to_char<'a>(&'a self, pc: &'a Pc) -> &'a $name<RCharacter> {
+            pub fn to_char<'a>(&'a self, pc: &'a Pc) -> &'a $name<char> {
                 if self.is_char() {
-                    self.transmute()
+                    unsafe { self.transmute() }
                 } else {
-                    let sexp = pc.protect(unsafe { Rf_coerceVector(self.sexp(), STRSXP) });
-                    pc.__private_transmute_sexp(sexp)
+                    pc.protect_and_transmute(unsafe { Rf_coerceVector(self.sexp(), STRSXP) })
                 }
             }
 
             /// Attempts to coerce storage mode to "double".
-            pub fn to_char_mut(&mut self, pc: &Pc) -> &mut $name<RCharacter> {
+            pub fn to_char_mut<'a>(&'a mut self, pc: &'a Pc) -> &'a mut $name<char> {
                 if self.is_char() {
-                    self.transmute_mut()
+                    unsafe { self.transmute_mut() }
                 } else {
-                    let sexp = pc.protect(unsafe { Rf_coerceVector(self.sexp(), STRSXP) });
-                    pc.__private_transmute_sexp_mut(sexp)
+                    pc.protect_and_transmute(unsafe { Rf_coerceVector(self.sexp(), STRSXP) })
                 }
             }
         }
@@ -2030,6 +2063,53 @@ pub trait RGetSet<T: ?Sized, I> {
     fn set(&mut self, index: I, value: &T) -> Result<(), &'static str>;
 }
 
+pub trait RGetSet0<T> {
+    /// Get the value at a certain index in an $tipe RVector.
+    fn get(&self) -> T;
+
+    /// Set the value at a certain index in an $tipe RVector.
+    fn set(&mut self, value: T);
+}
+
+macro_rules! r2scalar_getset2 {
+    ($tipe:ty, $tipe2:ty, $get:expr, $set:expr) => {
+        impl RGetSet0<$tipe2> for R2Scalar2<$tipe> {
+            fn get(&self) -> $tipe2 {
+                unsafe { $get(self.sexp(), 0) }
+            }
+
+            fn set(&mut self, value: $tipe2) {
+                unsafe { $set(self.sexp(), 0, value) }
+            }
+        }
+    };
+}
+
+r2scalar_getset2!(f64, f64, REAL_ELT, SET_REAL_ELT);
+r2scalar_getset2!(i32, i32, INTEGER_ELT, SET_INTEGER_ELT);
+r2scalar_getset2!(u8, u8, RAW_ELT, SET_RAW_ELT);
+
+impl RGetSet0<bool> for R2Scalar2<bool> {
+    fn get(&self) -> bool {
+        R::is_true(unsafe { LOGICAL_ELT(self.sexp(), 0) })
+    }
+
+    fn set(&mut self, value: bool) {
+        unsafe { SET_LOGICAL_ELT(self.sexp(), 0, R::as_logical(value)) }
+    }
+}
+
+impl R2Scalar2<char> {
+    pub fn get(&self) -> Result<&str, &'static str> {
+        let sexp = unsafe { STRING_ELT(self.sexp(), 0) };
+        sexp.as_str()
+    }
+
+    pub fn set(&mut self, value: &str, pc: &Pc) {
+        unsafe { SET_STRING_ELT(self.sexp(), 0, SEXP::from_str(value, pc)) }
+    }
+}
+
 pub trait RVectorConstructors<T> {
     #[allow(clippy::mut_from_ref)]
     fn new(length: usize, pc: &Pc) -> &mut Self;
@@ -2094,10 +2174,9 @@ macro_rules! r2vector2 {
 
         impl RVectorConstructors<$tipe> for R2Vector2<$tipe> {
             fn new(length: usize, pc: &Pc) -> &mut Self {
-                let sexp = pc.protect(unsafe {
+                pc.protect_and_transmute(unsafe {
                     Rf_allocVector($code, length.try_into().stop_str(TOO_LONG))
-                });
-                unsafe { &mut *sexp.cast::<R2Vector2<$tipe>>() }
+                })
             }
 
             fn from_value(value: $tipe, length: usize, pc: &Pc) -> &mut Self {
@@ -2208,9 +2287,9 @@ impl R2Vector2<bool> {
 
 impl RVectorConstructors<bool> for R2Vector2<bool> {
     fn new(length: usize, pc: &Pc) -> &mut Self {
-        let sexp =
-            pc.protect(unsafe { Rf_allocVector(LGLSXP, length.try_into().stop_str(TOO_LONG)) });
-        unsafe { &mut *sexp.cast::<R2Vector2<bool>>() }
+        pc.protect_and_transmute(unsafe {
+            Rf_allocVector(LGLSXP, length.try_into().stop_str(TOO_LONG))
+        })
     }
 
     fn from_value(value: bool, length: usize, pc: &Pc) -> &mut Self {
@@ -2257,7 +2336,7 @@ impl R2Vector2<char> {
 
     fn set_unchecked(&mut self, index: usize, value: &str) {
         let sexp = unsafe {
-            // Doesn't need protection because it's immediately set to a protected object.
+            // Doesn't need protection because it's immediately set to a protected object. // DBD?
             Rf_mkCharLenCE(
                 value.as_ptr() as *const c_char,
                 value.len().try_into().unwrap(),
@@ -2271,9 +2350,9 @@ impl R2Vector2<char> {
 impl RVectorConstructors<&str> for R2Vector2<char> {
     #[allow(clippy::mut_from_ref)]
     fn new(length: usize, pc: &Pc) -> &mut Self {
-        let sexp =
-            pc.protect(unsafe { Rf_allocVector(STRSXP, length.try_into().stop_str(TOO_LONG)) });
-        unsafe { &mut *sexp.cast::<R2Vector2<char>>() }
+        pc.protect_and_transmute(unsafe {
+            Rf_allocVector(STRSXP, length.try_into().stop_str(TOO_LONG))
+        })
     }
 
     #[allow(clippy::mut_from_ref)]
@@ -2293,7 +2372,7 @@ impl RVectorConstructors<&str> for R2Vector2<char> {
                 unsafe { SET_STRING_ELT(vec, index, pc.protect(Rf_duplicate(element))) };
             }
         }
-        unsafe { &mut *vec.cast::<R2Vector2<char>>() }
+        unsafe { vec.transmute_mut(pc) }
     }
 
     #[allow(clippy::mut_from_ref)]
@@ -2391,7 +2470,7 @@ impl<RMode> RObject<RMatrix, RMode> {
                 ncol.try_into().stop_str(TOO_LONG),
             )
         });
-        pc.__private_transmute_sexp_mut(sexp)
+        unsafe { sexp.transmute_mut(pc) }
     }
 
     /// Returns the number of rows in the RMatrix.
@@ -2680,9 +2759,9 @@ impl<RMode> RListMap<'_, RMode> {
 impl RObject<RList> {
     #[allow(clippy::mut_from_ref)]
     pub fn new(length: usize, pc: &Pc) -> &mut Self {
-        let sexp =
-            pc.protect(unsafe { Rf_allocVector(VECSXP, length.try_into().stop_str(TOO_LONG)) });
-        pc.__private_transmute_sexp_mut(sexp)
+        pc.protect_and_transmute(unsafe {
+            Rf_allocVector(VECSXP, length.try_into().stop_str(TOO_LONG))
+        })
     }
 
     #[allow(clippy::mut_from_ref)]
@@ -2858,7 +2937,7 @@ impl RObject<RExternalPtr> {
                 Rf_setAttrib(sexp, R_AtsignSymbol, R_AtsignSymbol);
                 R_RegisterCFinalizerEx(sexp, Some(free::<T>), 0);
             }
-            pc.__private_transmute_sexp_mut(sexp)
+            sexp.transmute_mut(pc)
         }
     }
 
@@ -3219,21 +3298,15 @@ r_from_iter3!(i32, i32);
 r_from_iter3!(u8, u8);
 
 // &RObject and SEXP
-impl<'a, RType, RMode> ToR<'a, RAnyType, RUnknown> for RObject<RType, RMode> {
-    fn to_r(&self, pc: &'a Pc) -> &'a mut RObject {
-        pc.__private_transmute_sexp_mut(self.sexp())
-    }
-}
-
 impl<'a> ToR<'a, RAnyType, RUnknown> for SEXP {
     fn to_r(&self, pc: &'a Pc) -> &'a mut RObject<RAnyType, RUnknown> {
-        pc.__private_transmute_sexp_mut(*self)
+        unsafe { self.transmute_mut(pc) }
     }
 }
 
 impl<'a> ToR<'a, RAnyType, RUnknown> for () {
     fn to_r(&self, pc: &'a Pc) -> &'a mut RObject<RAnyType, RUnknown> {
-        pc.__private_transmute_sexp_mut(unsafe { R_NilValue })
+        unsafe { R_NilValue.transmute_mut(pc) }
     }
 }
 

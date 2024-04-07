@@ -11,9 +11,8 @@ fn convolve4(a: &RObject<RVector, f64>, b: &RObject<RVector, f64>) {
 
     let vec_3 = RObject::<RVector, f64>::from_value(5.0, a.len() + b.len() - 1, pc);
 
-    let vec_3: R2Vector<f64> = R2Vector2::from_value(5.0, a.len() + b.len() - 1, pc);
+    let vec_3 = R2Vector2::from_value(5.0, a.len() + b.len() - 1, pc);
     // let vec_3 = RVector::from_value(5.0, a.len() + b.len() - 1, pc);
-    let a = vec_3.get(3);
 
     let bob = ["David", "Dahl"].to_2r(pc);
     let bob = [false, true].to_2r(pc);
@@ -21,6 +20,10 @@ fn convolve4(a: &RObject<RVector, f64>, b: &RObject<RVector, f64>) {
     let bill = "David".to_2r(pc);
     let bill = 1.0.to_2r(pc);
     let bill = 1_usize.to_2r(pc);
+    let sue = 1.0.to_2r(pc);
+
+    sue.set(4.0);
+    let s = sue.get();
 
     // let first_names
     // let ages = c(1,2,3);
@@ -28,7 +31,7 @@ fn convolve4(a: &RObject<RVector, f64>, b: &RObject<RVector, f64>) {
 
     let vec_3 = R2Vector2::<f64>::new(a.len() + b.len() - 1, pc);
     let vec_3 = R2Vector2::<char>::new(a.len() + b.len() - 1, pc);
-    vec_3.set(4, "advid", pc);
+    vec_3.set(4, "advid");
     let vec_4: &mut R2Vector2<f64> = R2Vector2::<f64>::new(a.len() + b.len() - 1, pc);
     let vec = R2Vector2::from_value(0.0, a.len() + b.len() - 1, pc);
     let vec = R2Vector2::from_value("String", a.len() + b.len() - 1, pc);
@@ -67,7 +70,7 @@ fn convolve2(a: &RObject<RVector>, b: &RObject<RVector>) {
             ab[i + j] += ai * bj;
         }
     }
-    vec
+    vec.sexp()
 }
 
 #[roxido]
