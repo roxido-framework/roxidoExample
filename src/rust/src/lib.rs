@@ -5,10 +5,7 @@ mod registration {
 use roxido::*;
 
 #[roxido]
-fn convolve4(a: &RObject<RVector, f64>, b: &RObject<RVector, f64>) {
-    let a = a.as_2robject2().as_vector().stop().as_f64().stop();
-    let b = b.as_2robject2().as_vector().stop().as_f64().stop();
-
+fn convolve4(a: &RVector<f64>, b: &RVector<f64>) {
     let vec_3 = RObject::<RVector, f64>::from_value(5.0, a.len() + b.len() - 1, pc);
 
     let vec_3 = R2Vector2::from_value(5.0, a.len() + b.len() - 1, pc);
@@ -74,9 +71,7 @@ fn convolve2(a: &RObject<RVector>, b: &RObject<RVector>) {
 }
 
 #[roxido]
-fn convolve22(a: &RObject<RVector>, b: &RObject<RVector>) {
-    let a = a.as_2robject2().as_vector().stop();
-    let b = b.as_2robject2().as_vector().stop();
+fn convolve22(a: &RVector, b: &RVector) {
     let vec = R2Vector2::from_value(0.0, a.len() + b.len() - 1, pc);
     let ab = vec.slice_mut();
     for (i, ai) in a.to_f64(pc).slice().iter().enumerate() {
@@ -85,6 +80,35 @@ fn convolve22(a: &RObject<RVector>, b: &RObject<RVector>) {
         }
     }
     vec.sexp()
+}
+
+#[roxido]
+fn convolve23(a: &[f64], b: &[f64]) {
+    let vec = R2Vector2::from_value(0.0, a.len() + b.len() - 1, pc);
+    let ab = vec.slice_mut();
+    for (i, ai) in a.iter().enumerate() {
+        for (j, bj) in b.iter().enumerate() {
+            ab[i + j] += ai * bj;
+        }
+    }
+    vec.sexp()
+}
+
+#[roxido]
+fn add(a: f64, b: f64) {
+    let c = (a + b).to_2r(pc);
+    c.sexp()
+}
+
+#[roxido]
+fn add2(c: &str) {
+    let c = c.to_2r(pc);
+    c.sexp()
+}
+
+#[roxido]
+fn add3(c: &RScalar) {
+    c.f64().to_2r(pc).sexp()
 }
 
 #[roxido]

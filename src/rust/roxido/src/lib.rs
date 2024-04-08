@@ -55,6 +55,10 @@ pub use roxido_macro::roxido;
 pub use rbindings::SEXP;
 
 pub trait SexpMethods {
+    fn as_robject(&self) -> &R2Object2;
+
+    fn as_robject_mut(&self) -> &mut R2Object2;
+
     fn as_str<'a>(&self) -> Result<&'a str, &'static str>;
 
     fn from_str(x: &str, pc: &Pc) -> Self;
@@ -74,6 +78,14 @@ pub trait SexpMethods {
 }
 
 impl SexpMethods for SEXP {
+    fn as_robject(&self) -> &R2Object2 {
+        unsafe { self.transmute(self) }
+    }
+
+    fn as_robject_mut(&self) -> &mut R2Object2 {
+        unsafe { self.transmute_mut(self) }
+    }
+
     fn as_str<'a>(&self) -> Result<&'a str, &'static str> {
         let c_str = unsafe { CStr::from_ptr(R_CHAR(*self) as *const c_char) };
         c_str.to_str().map_err(|_| "Not valid UTF8")
@@ -453,14 +465,6 @@ impl<RType, RMode> RObject<RType, RMode> {
         } else {
             Some(self)
         }
-    }
-
-    pub fn as_2robject2(&self) -> &R2Object2 {
-        self.transmute()
-    }
-
-    pub fn as_2robject_mut2(&mut self) -> &mut R2Object2 {
-        self.transmute_mut()
     }
 
     /// Attempts to recharacterize the RObject as a scalar (i.e., a vector of length 1).
