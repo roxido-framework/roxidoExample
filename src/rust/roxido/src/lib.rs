@@ -61,16 +61,16 @@ pub trait SexpMethods {
 
     /// # Safety
     /// Expert use only.
-    unsafe fn transmute<T>(self, _pc: &Pc) -> &T;
+    unsafe fn transmute<T: IsRObject, A>(self, _anchor: &A) -> &T;
 
     /// # Safety
     /// Expert use only.
     #[allow(clippy::mut_from_ref)]
-    unsafe fn transmute_mut<T>(self, _pc: &Pc) -> &mut T;
+    unsafe fn transmute_mut<T: IsRObject, A>(self, _anchor: &A) -> &mut T;
 
     /// # Safety
     /// Expert use only.
-    unsafe fn transmute_static<T>(self) -> &'static T;
+    unsafe fn transmute_static<T: IsRObject>(self) -> &'static T;
 }
 
 impl SexpMethods for SEXP {
@@ -89,11 +89,11 @@ impl SexpMethods for SEXP {
         })
     }
 
-    unsafe fn transmute<T>(self, _pc: &Pc) -> &T {
+    unsafe fn transmute<T, A>(self, _anchor: &A) -> &T {
         unsafe { &*self.cast::<T>() }
     }
 
-    unsafe fn transmute_mut<T>(self, _pc: &Pc) -> &mut T {
+    unsafe fn transmute_mut<T, A>(self, _anchor: &A) -> &mut T {
         unsafe { &mut *self.cast::<T>() }
     }
 
@@ -117,20 +117,18 @@ pub struct RObject<RType = RAnyType, RMode = RUnknown> {
     rtype: PhantomData<(RType, RMode)>,
 }
 
-pub trait IsRObject {
+pub trait IsRObject: Sized {
     fn sexp(&self) -> SEXP {
         self as *const Self as SEXP
     }
-}
 
-trait IsTransmutable {
     /// # Safety
     /// Expert use only.
     unsafe fn transmute<T: IsRObject>(&self) -> &T
     where
         Self: Sized,
     {
-        unsafe { std::mem::transmute::<&Self, &T>(self) }
+        self.sexp().transmute(self)
     }
 
     /// # Safety
@@ -139,26 +137,37 @@ trait IsTransmutable {
     where
         Self: Sized,
     {
-        unsafe { std::mem::transmute::<&mut Self, &mut T>(self) }
+        self.sexp().transmute_mut(self)
+    }
+
+    /// Duplicate an object.
+    ///
+    /// Multiple symbols may be bound to the same object, so if the usual R semantics are to
+    /// apply, any code which alters one of them needs to make a copy first.
+    /// E.g, call this method on arguments pass via `.Call` before modifying them.
+    ///
+    #[allow(clippy::mut_from_ref)]
+    fn clone<'a>(&self, pc: &'a Pc) -> &'a mut Self {
+        unsafe { pc.protect_and_transmute(Rf_duplicate(self.sexp())) }
     }
 }
 
 macro_rules! baseline {
     ($name:ident) => {
         #[repr(C)]
-        pub struct $name<RMode = RUnknown> {
+        pub struct $name {
             pub sexprec: SEXPREC,
-            rtype: PhantomData<RMode>,
         }
-        impl<T> IsRObject for $name<T> {}
-        impl<T> IsTransmutable for $name<T> {}
+        impl IsRObject for $name {}
     };
 }
 
-baseline!(R2Scalar2);
-baseline!(R2Vector2);
-baseline!(R2Matrix2);
-baseline!(R2Array2);
+baseline!(R2Object2);
+baseline!(R2Symbol2);
+baseline!(R2List2);
+baseline!(R2DataFrame2);
+baseline!(R2Function2);
+baseline!(R2ExternalPtr2);
 
 pub trait R2HasLength2: IsRObject {
     /// Returns the length of the RObject.
@@ -178,10 +187,22 @@ pub trait R2HasLength2: IsRObject {
     }
 }
 
-impl<T> R2HasLength2 for R2Scalar2<T> {}
-impl<T> R2HasLength2 for R2Vector2<T> {}
-impl<T> R2HasLength2 for R2Matrix2<T> {}
-impl<T> R2HasLength2 for R2Array2<T> {}
+macro_rules! baseline_with_type {
+    ($name:ident) => {
+        #[repr(C)]
+        pub struct $name<RMode = RUnknown> {
+            pub sexprec: SEXPREC,
+            rtype: PhantomData<RMode>,
+        }
+        impl<T> IsRObject for $name<T> {}
+        impl<T> R2HasLength2 for $name<T> {}
+    };
+}
+
+baseline_with_type!(R2Scalar2);
+baseline_with_type!(R2Vector2);
+baseline_with_type!(R2Matrix2);
+baseline_with_type!(R2Array2);
 
 pub struct Pc {
     counter: std::cell::RefCell<i32>,
@@ -268,9 +289,9 @@ impl Pc {
 
     #[allow(clippy::not_unsafe_ptr_arg_deref)]
     #[allow(clippy::mut_from_ref)]
-    pub fn protect_and_transmute<T>(&self, sexp: SEXP) -> &mut T {
+    pub unsafe fn protect_and_transmute<T: IsRObject>(&self, sexp: SEXP) -> &mut T {
         let sexp = self.protect(sexp);
-        unsafe { &mut *sexp.cast::<T>() }
+        unsafe { sexp.transmute_mut(self) }
     }
 }
 
@@ -385,6 +406,9 @@ impl R {
     }
 }
 
+impl<RType, RMode> IsRObject for RObject<RType, RMode> {}
+
+// DBD: Ready to delete
 impl<RType, RMode> RObject<RType, RMode> {
     pub fn sexp(&self) -> SEXP {
         self as *const RObject<RType, RMode> as SEXP
@@ -402,8 +426,8 @@ impl<RType, RMode> RObject<RType, RMode> {
         unsafe { std::mem::transmute::<&Self, &T>(self) }
     }
 
-    fn transmute_mut<RTypeTo, RModeTo>(&mut self) -> &mut RObject<RTypeTo, RModeTo> {
-        unsafe { std::mem::transmute::<&mut Self, &mut RObject<RTypeTo, RModeTo>>(self) }
+    fn transmute_mut<T>(&mut self) -> &mut T {
+        unsafe { std::mem::transmute::<&mut Self, &mut T>(self) }
     }
 
     /// Duplicate an object.
@@ -414,7 +438,7 @@ impl<RType, RMode> RObject<RType, RMode> {
     ///
     #[allow(clippy::mut_from_ref)]
     pub fn clone<'a>(&self, pc: &'a Pc) -> &'a mut RObject<RType, RMode> {
-        pc.protect_and_transmute(unsafe { Rf_duplicate(self.sexp()) })
+        unsafe { pc.protect_and_transmute(Rf_duplicate(self.sexp())) }
     }
 
     /// Recharacterize an RObject<RType, RMode> as an RObject (i.e., an RObject<RAnyType, RUnknown>).
@@ -431,6 +455,14 @@ impl<RType, RMode> RObject<RType, RMode> {
         }
     }
 
+    pub fn as_2robject2(&self) -> &R2Object2 {
+        self.transmute()
+    }
+
+    pub fn as_2robject_mut2(&mut self) -> &mut R2Object2 {
+        self.transmute_mut()
+    }
+
     /// Attempts to recharacterize the RObject as a scalar (i.e., a vector of length 1).
     pub fn as_scalar(&self) -> Result<&RObject<RScalar, RMode>, &'static str> {
         let s = self.as_vector()?;
@@ -438,15 +470,6 @@ impl<RType, RMode> RObject<RType, RMode> {
             Ok(self.transmute())
         } else {
             Err("Not a scalar")
-        }
-    }
-
-    pub fn as_2scalar2(&self) -> Result<&R2Scalar2<RMode>, &'static str> {
-        let s = self.as_2vector2()?;
-        if s.is_scalar() {
-            Ok(self.transmute())
-        } else {
-            Err("Not a vector")
         }
     }
 
@@ -460,14 +483,6 @@ impl<RType, RMode> RObject<RType, RMode> {
     }
 
     pub fn as_vector(&self) -> Result<&RObject<RVector, RMode>, &'static str> {
-        if self.is_vector() {
-            Ok(self.transmute())
-        } else {
-            Err("Not a vector")
-        }
-    }
-
-    pub fn as_2vector2(&self) -> Result<&R2Vector2<RMode>, &'static str> {
         if self.is_vector() {
             Ok(self.transmute())
         } else {
@@ -495,16 +510,6 @@ impl<RType, RMode> RObject<RType, RMode> {
 
     /// Check if appropriate to characterize as an `RObject<RMatrix>`.
     /// Checks using R's `Rf_isMatrix` function.
-    pub fn as_2matrix2(&self) -> Result<&R2Matrix2<RMode>, &'static str> {
-        if self.is_matrix() {
-            Ok(self.transmute())
-        } else {
-            Err("Not a matrix")
-        }
-    }
-
-    /// Check if appropriate to characterize as an `RObject<RMatrix>`.
-    /// Checks using R's `Rf_isMatrix` function.
     pub fn as_matrix_mut(&mut self) -> Result<&mut RObject<RMatrix, RMode>, &'static str> {
         if self.is_matrix() {
             Ok(self.transmute_mut())
@@ -516,16 +521,6 @@ impl<RType, RMode> RObject<RType, RMode> {
     /// Check if appropriate to characterize as an `RObject<RArray>`.
     /// Checks using R's `Rf_isArray` function.
     pub fn as_array(&self) -> Result<&RObject<RArray, RMode>, &'static str> {
-        if self.is_array() {
-            Ok(self.transmute())
-        } else {
-            Err("Not a vector")
-        }
-    }
-
-    /// Check if appropriate to characterize as an `RObject<RArray>`.
-    /// Checks using R's `Rf_isArray` function.
-    pub fn as_2array2(&self) -> Result<&R2Array2<RMode>, &'static str> {
         if self.is_array() {
             Ok(self.transmute())
         } else {
@@ -711,6 +706,252 @@ impl<RType, RMode> RObject<RType, RMode> {
     }
 }
 
+impl R2Object2 {
+    /// Returns the result of the is_null method, but as an Option value.
+    pub fn as_option(&self) -> Option<&Self> {
+        if self.is_null() {
+            None
+        } else {
+            Some(self)
+        }
+    }
+
+    pub fn as_scalar(&self) -> Result<&R2Scalar2, &'static str> {
+        let s = self.as_vector()?;
+        if s.is_scalar() {
+            Ok(unsafe { self.transmute() })
+        } else {
+            Err("Not a vector")
+        }
+    }
+
+    pub fn as_scalar_mut(&mut self) -> Result<&mut R2Scalar2, &'static str> {
+        let s = self.as_vector()?;
+        if s.is_scalar() {
+            Ok(unsafe { self.transmute_mut() })
+        } else {
+            Err("Not a scalar")
+        }
+    }
+
+    pub fn as_vector(&self) -> Result<&R2Vector2, &'static str> {
+        if self.is_vector() {
+            Ok(unsafe { self.transmute() })
+        } else {
+            Err("Not a vector")
+        }
+    }
+
+    pub fn as_vector_mut(&mut self) -> Result<&mut R2Vector2, &'static str> {
+        if self.is_vector() {
+            Ok(unsafe { self.transmute_mut() })
+        } else {
+            Err("Not a vector")
+        }
+    }
+
+    /// Check if appropriate to characterize as an `RObject<RMatrix>`.
+    /// Checks using R's `Rf_isMatrix` function.
+    pub fn as_matrix(&self) -> Result<&R2Matrix2, &'static str> {
+        if self.is_matrix() {
+            Ok(unsafe { self.transmute() })
+        } else {
+            Err("Not a matrix")
+        }
+    }
+
+    /// Check if appropriate to characterize as an `RObject<RMatrix>`.
+    /// Checks using R's `Rf_isMatrix` function.
+    pub fn as_matrix_mut(&mut self) -> Result<&mut R2Matrix2, &'static str> {
+        if self.is_matrix() {
+            Ok(unsafe { self.transmute_mut() })
+        } else {
+            Err("Not a matrix")
+        }
+    }
+
+    /// Check if appropriate to characterize as an `RObject<RArray>`.
+    /// Checks using R's `Rf_isArray` function.
+    pub fn as_array(&self) -> Result<&R2Array2, &'static str> {
+        if self.is_array() {
+            Ok(unsafe { self.transmute() })
+        } else {
+            Err("Not a vector")
+        }
+    }
+
+    /// Check if appropriate to characterize as an `RObject<RArray>`.
+    /// Checks using R's `Rf_isArray` function.
+    pub fn as_array_mut(&mut self) -> Result<&mut R2Array2, &'static str> {
+        if self.is_array() {
+            Ok(unsafe { self.transmute_mut() })
+        } else {
+            Err("Not a vector")
+        }
+    }
+
+    /// Check if appropriate to characterize as an `RObject<RVector, RList>`.
+    /// Checks using R's `Rf_isVectorList` function.
+    pub fn as_list(&self) -> Result<&R2List2, &'static str> {
+        if self.is_list() {
+            Ok(unsafe { self.transmute() })
+        } else {
+            Err("Not a list")
+        }
+    }
+
+    /// Check if appropriate to characterize as an `RObject<RVector, RList>`.
+    /// Checks using R's `Rf_isVectorList` function.
+    pub fn as_list_mut(&mut self) -> Result<&mut R2List2, &'static str> {
+        if self.is_list() {
+            Ok(unsafe { self.transmute_mut() })
+        } else {
+            Err("Not a list")
+        }
+    }
+
+    /// Check if appropriate to characterize as an `RObject<RVector, RDataFrame>`.
+    /// Checks using R's `Rf_isFrame` function.
+    pub fn as_data_frame(&self) -> Result<&R2DataFrame2, &'static str> {
+        if self.is_data_frame() {
+            Ok(unsafe { self.transmute() })
+        } else {
+            Err("Not a data frame")
+        }
+    }
+
+    /// Check if appropriate to characterize as an `RObject<RVector, RDataFrame>`.
+    /// Checks using R's `Rf_isFrame` function.
+    pub fn as_data_frame_mut(&mut self) -> Result<&mut R2DataFrame2, &'static str> {
+        if self.is_data_frame() {
+            Ok(unsafe { self.transmute_mut() })
+        } else {
+            Err("Not a data frame")
+        }
+    }
+
+    /// Check if appropriate to characterize as an `RObject<RFunction>`.
+    /// Checks using R's `Rf_isFunction` function.
+    pub fn as_function(&self) -> Result<&R2Function2, &'static str> {
+        if self.is_function() {
+            Ok(unsafe { self.transmute() })
+        } else {
+            Err("Not a function")
+        }
+    }
+
+    /// Check if appropriate to characterize as an `RObject<RFunction>`.
+    /// Checks using R's `Rf_isFunction` function.
+    pub fn as_function_mut(&mut self) -> Result<&mut R2Function2, &'static str> {
+        if self.is_function() {
+            Ok(unsafe { self.transmute_mut() })
+        } else {
+            Err("Not a function")
+        }
+    }
+
+    /// Check if appropriate to characterize as an `RObject<RExternalPtr>`.
+    /// Uses the SEXP type to determine if this is possible.
+    pub fn as_external_ptr(&self) -> Result<&R2ExternalPtr2, &'static str> {
+        if self.is_external_ptr() {
+            Ok(unsafe { self.transmute() })
+        } else {
+            Err("Not an external pointer")
+        }
+    }
+
+    /// Check if appropriate to characterize as an `RObject<RExternalPtr>`.
+    /// Uses the SEXP type to determine if this is possible.
+    pub fn as_external_ptr_mut(&mut self) -> Result<&mut R2ExternalPtr2, &'static str> {
+        if self.is_external_ptr() {
+            Ok(unsafe { self.transmute_mut() })
+        } else {
+            Err("Not an external pointer")
+        }
+    }
+
+    /// Check if appropriate to characterize as an `RObject<RSymbol>`.
+    /// Uses the SEXP type to determine if this is possible.
+    pub fn as_symbol(&self) -> Result<&R2Symbol2, &'static str> {
+        if self.is_symbol() {
+            Ok(unsafe { self.transmute() })
+        } else {
+            Err("Not an external pointer")
+        }
+    }
+
+    /// Check if appropriate to characterize as an `RObject<RSymbol>`.
+    /// Uses the SEXP type to determine if this is possible.
+    pub fn as_symbol_mut(&mut self) -> Result<&mut R2Symbol2, &'static str> {
+        if self.is_symbol() {
+            Ok(unsafe { self.transmute_mut() })
+        } else {
+            Err("Not an external pointer")
+        }
+    }
+
+    /// Check if RObject can be interpreted as the NULL value in R.
+    pub fn is_null(&self) -> bool {
+        unsafe { Rf_isNull(self.sexp()) != 0 }
+    }
+
+    pub fn is_vector(&self) -> bool {
+        unsafe { Rf_isVectorAtomic(self.sexp()) != 0 }
+    }
+
+    pub fn is_matrix(&self) -> bool {
+        unsafe { Rf_isMatrix(self.sexp()) != 0 }
+    }
+
+    pub fn is_array(&self) -> bool {
+        unsafe { Rf_isArray(self.sexp()) != 0 }
+    }
+
+    pub fn is_list(&self) -> bool {
+        unsafe { Rf_isVectorList(self.sexp()) != 0 }
+    }
+
+    pub fn is_data_frame(&self) -> bool {
+        unsafe { Rf_isFrame(self.sexp()) != 0 }
+    }
+
+    pub fn is_function(&self) -> bool {
+        unsafe { Rf_isFunction(self.sexp()) != 0 }
+    }
+
+    pub fn is_external_ptr(&self) -> bool {
+        unsafe { TYPEOF(self.sexp()) == EXTPTRSXP as i32 }
+    }
+
+    pub fn is_symbol(&self) -> bool {
+        unsafe { TYPEOF(self.sexp()) == SYMSXP as i32 }
+    }
+
+    /// Get the class or classes of the data in an RObject.
+    pub fn get_class(&self) -> &R2Vector2<char> {
+        unsafe { Rf_getAttrib(self.sexp(), R2Symbol2::class().sexp()).transmute(self) }
+    }
+
+    /// Set the class or classes of the data for an RObject.
+    pub fn set_class(&mut self, names: &R2Vector2<char>) {
+        unsafe {
+            Rf_classgets(self.sexp(), names.sexp());
+        }
+    }
+
+    /// Get an attribute.
+    pub fn get_attribute(&self, which: &R2Symbol2) -> &R2Object2 {
+        unsafe { Rf_getAttrib(self.sexp(), which.sexp()).transmute(self) }
+    }
+
+    /// Set an attribute.
+    pub fn set_attribute<RTypeValue, RModeValue>(&mut self, which: &R2Symbol2, value: &R2Object2) {
+        unsafe {
+            Rf_setAttrib(self.sexp(), which.sexp(), value.sexp());
+        }
+    }
+}
+
 impl RObject<RError> {
     /// Define a new error.
     ///
@@ -725,18 +966,12 @@ impl RObject<RError> {
     }
 }
 
+// DBD: Ready to delete
 impl RObject<RSymbol> {
     /// Define a new symbol.
     #[allow(clippy::mut_from_ref)]
     pub fn new<'a>(x: &str, pc: &'a Pc) -> &'a mut Self {
-        let sexp = pc.protect(unsafe {
-            Rf_mkCharLenCE(
-                x.as_ptr() as *const c_char,
-                x.len().try_into().stop_str(TOO_LONG),
-                cetype_t_CE_UTF8,
-            )
-        });
-        pc.protect_and_transmute(unsafe { Rf_installChar(sexp) })
+        unsafe { pc.protect_and_transmute(SEXP::from_str(x, pc)) }
     }
 
     /// Get R's "dim" symbol.
@@ -765,6 +1000,40 @@ impl RObject<RSymbol> {
     }
 }
 
+impl R2Symbol2 {
+    /// Define a new symbol.
+    #[allow(clippy::mut_from_ref)]
+    pub fn new<'a>(x: &str, pc: &'a Pc) -> &'a mut Self {
+        unsafe { pc.protect_and_transmute(SEXP::from_str(x, pc)) }
+    }
+
+    /// Get R's "dim" symbol.
+    pub fn dim() -> &'static Self {
+        unsafe { R_DimSymbol.transmute_static() }
+    }
+
+    /// Get R's "names" symbol.
+    pub fn names() -> &'static Self {
+        unsafe { R_NamesSymbol.transmute_static() }
+    }
+
+    /// Get R's "rownames" symbol.
+    pub fn rownames() -> &'static Self {
+        unsafe { R_RowNamesSymbol.transmute_static() }
+    }
+
+    /// Get R's "dimnames" symbol.
+    pub fn dimnames() -> &'static Self {
+        unsafe { R_DimNamesSymbol.transmute_static() }
+    }
+
+    /// Get R's "class" symbol.
+    pub fn class() -> &'static Self {
+        unsafe { R_ClassSymbol.transmute_static() }
+    }
+}
+
+// DBD: Ready to delete
 impl<RType: RHasLength, RMode> RObject<RType, RMode> {
     /// Returns the length of the RObject.
     pub fn len(&self) -> usize {
@@ -783,6 +1052,7 @@ impl<RType: RHasLength, RMode> RObject<RType, RMode> {
     }
 }
 
+// DBD: Ready to delete
 impl<RType: RAtomic + RHasLength, RMode> RObject<RType, RMode> {
     fn slice_engine<U>(&self, data: *mut U) -> &[U] {
         unsafe { std::slice::from_raw_parts_mut(data, self.len()) }
@@ -820,7 +1090,7 @@ impl<RType: RAtomic + RHasLength, RMode> RObject<RType, RMode> {
         if self.is_f64() {
             self.transmute()
         } else {
-            pc.protect_and_transmute(unsafe { Rf_coerceVector(self.sexp(), REALSXP) })
+            unsafe { pc.protect_and_transmute(Rf_coerceVector(self.sexp(), REALSXP)) }
         }
     }
 
@@ -829,7 +1099,7 @@ impl<RType: RAtomic + RHasLength, RMode> RObject<RType, RMode> {
         if self.is_f64() {
             self.transmute_mut()
         } else {
-            pc.protect_and_transmute(unsafe { Rf_coerceVector(self.sexp(), REALSXP) })
+            unsafe { pc.protect_and_transmute(Rf_coerceVector(self.sexp(), REALSXP)) }
         }
     }
 
@@ -861,7 +1131,7 @@ impl<RType: RAtomic + RHasLength, RMode> RObject<RType, RMode> {
         if self.is_i32() {
             self.transmute()
         } else {
-            pc.protect_and_transmute(unsafe { Rf_coerceVector(self.sexp(), INTSXP) })
+            unsafe { pc.protect_and_transmute(Rf_coerceVector(self.sexp(), INTSXP)) }
         }
     }
 
@@ -870,7 +1140,7 @@ impl<RType: RAtomic + RHasLength, RMode> RObject<RType, RMode> {
         if self.is_i32() {
             self.transmute_mut()
         } else {
-            pc.protect_and_transmute(unsafe { Rf_coerceVector(self.sexp(), INTSXP) })
+            unsafe { pc.protect_and_transmute(Rf_coerceVector(self.sexp(), INTSXP)) }
         }
     }
 
@@ -902,7 +1172,7 @@ impl<RType: RAtomic + RHasLength, RMode> RObject<RType, RMode> {
         if self.is_u8() {
             self.transmute()
         } else {
-            pc.protect_and_transmute(unsafe { Rf_coerceVector(self.sexp(), RAWSXP) })
+            unsafe { pc.protect_and_transmute(Rf_coerceVector(self.sexp(), RAWSXP)) }
         }
     }
 
@@ -911,7 +1181,7 @@ impl<RType: RAtomic + RHasLength, RMode> RObject<RType, RMode> {
         if self.is_u8() {
             self.transmute_mut()
         } else {
-            pc.protect_and_transmute(unsafe { Rf_coerceVector(self.sexp(), RAWSXP) })
+            unsafe { pc.protect_and_transmute(Rf_coerceVector(self.sexp(), RAWSXP)) }
         }
     }
 
@@ -943,7 +1213,7 @@ impl<RType: RAtomic + RHasLength, RMode> RObject<RType, RMode> {
         if self.is_bool() {
             self.transmute()
         } else {
-            pc.protect_and_transmute(unsafe { Rf_coerceVector(self.sexp(), LGLSXP) })
+            unsafe { pc.protect_and_transmute(Rf_coerceVector(self.sexp(), LGLSXP)) }
         }
     }
 
@@ -952,7 +1222,7 @@ impl<RType: RAtomic + RHasLength, RMode> RObject<RType, RMode> {
         if self.is_bool() {
             self.transmute_mut()
         } else {
-            pc.protect_and_transmute(unsafe { Rf_coerceVector(self.sexp(), LGLSXP) })
+            unsafe { pc.protect_and_transmute(Rf_coerceVector(self.sexp(), LGLSXP)) }
         }
     }
 
@@ -984,7 +1254,7 @@ impl<RType: RAtomic + RHasLength, RMode> RObject<RType, RMode> {
         if self.is_character() {
             self.transmute()
         } else {
-            pc.protect_and_transmute(unsafe { Rf_coerceVector(self.sexp(), STRSXP) })
+            unsafe { pc.protect_and_transmute(Rf_coerceVector(self.sexp(), STRSXP)) }
         }
     }
 
@@ -993,7 +1263,7 @@ impl<RType: RAtomic + RHasLength, RMode> RObject<RType, RMode> {
         if self.is_character() {
             self.transmute_mut()
         } else {
-            pc.protect_and_transmute(unsafe { Rf_coerceVector(self.sexp(), STRSXP) })
+            unsafe { pc.protect_and_transmute(Rf_coerceVector(self.sexp(), STRSXP)) }
         }
     }
 }
@@ -1001,9 +1271,9 @@ impl<RType: RAtomic + RHasLength, RMode> RObject<RType, RMode> {
 impl<RMode> RObject<RVector, RMode> {
     #[allow(clippy::mut_from_ref)]
     fn new_engine(code: u32, length: usize, pc: &Pc) -> &mut Self {
-        pc.protect_and_transmute(unsafe {
-            Rf_allocVector(code, length.try_into().stop_str(TOO_LONG))
-        })
+        unsafe {
+            pc.protect_and_transmute(Rf_allocVector(code, length.try_into().stop_str(TOO_LONG)))
+        }
     }
 }
 
@@ -1032,7 +1302,7 @@ impl<RType> RObject<RArray, RType> {
     #[allow(clippy::mut_from_ref)]
     fn new_engine<'a>(code: u32, dim: &[usize], pc: &'a Pc) -> &'a mut RObject<RArray, RType> {
         let d = dim.to_r(pc);
-        pc.protect_and_transmute(unsafe { Rf_allocArray(code, d.sexp()) })
+        unsafe { pc.protect_and_transmute(Rf_allocArray(code, d.sexp())) }
     }
 
     /// Returns the dimensions of the RArray.
@@ -1363,7 +1633,7 @@ impl<RMode> RObject<RScalar, RMode> {
     }
 }
 
-impl<RMode> R2Scalar2<RMode> {
+impl R2Scalar2 {
     /// Check if appropriate to characterize as an f64.
     pub fn f64(&self) -> f64 {
         unsafe { Rf_asReal(self.sexp()) }
@@ -1572,7 +1842,7 @@ macro_rules! r2scalar2 {
         impl RScalarConstructor<$tipe> for R2Scalar2<$tipe> {
             #[allow(clippy::mut_from_ref)]
             fn from_value(value: $tipe, pc: &Pc) -> &mut Self {
-                pc.protect_and_transmute(unsafe { $code(value) })
+                unsafe { pc.protect_and_transmute($code(value)) }
             }
         }
     };
@@ -1585,26 +1855,26 @@ r2scalar2!(u8, Rf_ScalarRaw);
 impl RScalarConstructor<bool> for R2Scalar2<bool> {
     #[allow(clippy::mut_from_ref)]
     fn from_value(value: bool, pc: &Pc) -> &mut Self {
-        pc.protect_and_transmute(unsafe {
-            Rf_ScalarLogical(if value {
+        unsafe {
+            pc.protect_and_transmute(Rf_ScalarLogical(if value {
                 Rboolean_TRUE as i32
             } else {
                 Rboolean_FALSE as i32
-            })
-        })
+            }))
+        }
     }
 }
 
 impl RScalarConstructor<&str> for R2Scalar2<char> {
     #[allow(clippy::mut_from_ref)]
     fn from_value<'a>(value: &str, pc: &'a Pc) -> &'a mut Self {
-        pc.protect_and_transmute(unsafe {
-            Rf_ScalarString(pc.protect(Rf_mkCharLenCE(
+        unsafe {
+            pc.protect_and_transmute(Rf_ScalarString(pc.protect(Rf_mkCharLenCE(
                 value.as_ptr() as *const c_char,
                 value.len().try_into().stop_str(TOO_LONG),
                 cetype_t_CE_UTF8,
-            )))
-        })
+            ))))
+        }
     }
 }
 
@@ -1613,7 +1883,7 @@ macro_rules! rscalar {
         impl RObject<RScalar, $tipe> {
             #[allow(clippy::mut_from_ref)]
             pub fn from_value(value: $tipe2, pc: &Pc) -> &mut Self {
-                pc.protect_and_transmute(unsafe { $code(value) })
+                unsafe { pc.protect_and_transmute($code(value)) }
             }
 
             /// Get the value at a certain index in an $tipe RVector.
@@ -1659,14 +1929,13 @@ impl RObject<RScalar, bool> {
 impl RObject<RScalar, RCharacter> {
     #[allow(clippy::mut_from_ref)]
     pub fn from_value<'a>(value: &str, pc: &'a Pc) -> &'a mut Self {
-        let sexp = unsafe {
-            Rf_ScalarString(Rf_mkCharLenCE(
+        unsafe {
+            pc.protect_and_transmute(Rf_ScalarString(Rf_mkCharLenCE(
                 value.as_ptr() as *const c_char,
                 value.len().try_into().stop_str(TOO_LONG),
                 cetype_t_CE_UTF8,
-            ))
-        };
-        pc.protect_and_transmute(sexp)
+            )))
+        }
     }
 
     /// Get the value at a certain index in an $tipe RVector.
@@ -1678,7 +1947,9 @@ impl RObject<RScalar, RCharacter> {
 
     /// Set the value at a certain index in an $tipe RVector.
     pub fn set(&mut self, value: &str) {
-        let _ = self.transmute_mut::<RVector, RCharacter>().set(0, value);
+        let _ = self
+            .transmute_mut::<RObject<RVector, RCharacter>>()
+            .set(0, value);
     }
 }
 
@@ -1820,7 +2091,7 @@ macro_rules! rconvertable {
                 if self.is_f64() {
                     unsafe { self.transmute() }
                 } else {
-                    pc.protect_and_transmute(unsafe { Rf_coerceVector(self.sexp(), REALSXP) })
+                    unsafe { pc.protect_and_transmute(Rf_coerceVector(self.sexp(), REALSXP)) }
                 }
             }
 
@@ -1829,7 +2100,7 @@ macro_rules! rconvertable {
                 if self.is_f64() {
                     unsafe { self.transmute_mut() }
                 } else {
-                    pc.protect_and_transmute(unsafe { Rf_coerceVector(self.sexp(), REALSXP) })
+                    unsafe { pc.protect_and_transmute(Rf_coerceVector(self.sexp(), REALSXP)) }
                 }
             }
 
@@ -1861,7 +2132,7 @@ macro_rules! rconvertable {
                 if self.is_i32() {
                     unsafe { self.transmute() }
                 } else {
-                    pc.protect_and_transmute(unsafe { Rf_coerceVector(self.sexp(), INTSXP) })
+                    unsafe { pc.protect_and_transmute(Rf_coerceVector(self.sexp(), INTSXP)) }
                 }
             }
 
@@ -1870,7 +2141,7 @@ macro_rules! rconvertable {
                 if self.is_i32() {
                     unsafe { self.transmute_mut() }
                 } else {
-                    pc.protect_and_transmute(unsafe { Rf_coerceVector(self.sexp(), INTSXP) })
+                    unsafe { pc.protect_and_transmute(Rf_coerceVector(self.sexp(), INTSXP)) }
                 }
             }
 
@@ -1902,7 +2173,7 @@ macro_rules! rconvertable {
                 if self.is_u8() {
                     unsafe { self.transmute() }
                 } else {
-                    pc.protect_and_transmute(unsafe { Rf_coerceVector(self.sexp(), RAWSXP) })
+                    unsafe { pc.protect_and_transmute(Rf_coerceVector(self.sexp(), RAWSXP)) }
                 }
             }
 
@@ -1911,7 +2182,7 @@ macro_rules! rconvertable {
                 if self.is_u8() {
                     unsafe { self.transmute_mut() }
                 } else {
-                    pc.protect_and_transmute(unsafe { Rf_coerceVector(self.sexp(), RAWSXP) })
+                    unsafe { pc.protect_and_transmute(Rf_coerceVector(self.sexp(), RAWSXP)) }
                 }
             }
 
@@ -1943,7 +2214,7 @@ macro_rules! rconvertable {
                 if self.is_bool() {
                     unsafe { self.transmute() }
                 } else {
-                    pc.protect_and_transmute(unsafe { Rf_coerceVector(self.sexp(), LGLSXP) })
+                    unsafe { pc.protect_and_transmute(Rf_coerceVector(self.sexp(), LGLSXP)) }
                 }
             }
 
@@ -1952,7 +2223,7 @@ macro_rules! rconvertable {
                 if self.is_bool() {
                     unsafe { self.transmute_mut() }
                 } else {
-                    pc.protect_and_transmute(unsafe { Rf_coerceVector(self.sexp(), LGLSXP) })
+                    unsafe { pc.protect_and_transmute(Rf_coerceVector(self.sexp(), LGLSXP)) }
                 }
             }
 
@@ -1984,7 +2255,7 @@ macro_rules! rconvertable {
                 if self.is_char() {
                     unsafe { self.transmute() }
                 } else {
-                    pc.protect_and_transmute(unsafe { Rf_coerceVector(self.sexp(), STRSXP) })
+                    unsafe { pc.protect_and_transmute(Rf_coerceVector(self.sexp(), STRSXP)) }
                 }
             }
 
@@ -1993,7 +2264,7 @@ macro_rules! rconvertable {
                 if self.is_char() {
                     unsafe { self.transmute_mut() }
                 } else {
-                    pc.protect_and_transmute(unsafe { Rf_coerceVector(self.sexp(), STRSXP) })
+                    unsafe { pc.protect_and_transmute(Rf_coerceVector(self.sexp(), STRSXP)) }
                 }
             }
         }
@@ -2174,9 +2445,12 @@ macro_rules! r2vector2 {
 
         impl RVectorConstructors<$tipe> for R2Vector2<$tipe> {
             fn new(length: usize, pc: &Pc) -> &mut Self {
-                pc.protect_and_transmute(unsafe {
-                    Rf_allocVector($code, length.try_into().stop_str(TOO_LONG))
-                })
+                unsafe {
+                    pc.protect_and_transmute(Rf_allocVector(
+                        $code,
+                        length.try_into().stop_str(TOO_LONG),
+                    ))
+                }
             }
 
             fn from_value(value: $tipe, length: usize, pc: &Pc) -> &mut Self {
@@ -2287,9 +2561,9 @@ impl R2Vector2<bool> {
 
 impl RVectorConstructors<bool> for R2Vector2<bool> {
     fn new(length: usize, pc: &Pc) -> &mut Self {
-        pc.protect_and_transmute(unsafe {
-            Rf_allocVector(LGLSXP, length.try_into().stop_str(TOO_LONG))
-        })
+        unsafe {
+            pc.protect_and_transmute(Rf_allocVector(LGLSXP, length.try_into().stop_str(TOO_LONG)))
+        }
     }
 
     fn from_value(value: bool, length: usize, pc: &Pc) -> &mut Self {
@@ -2350,9 +2624,9 @@ impl R2Vector2<char> {
 impl RVectorConstructors<&str> for R2Vector2<char> {
     #[allow(clippy::mut_from_ref)]
     fn new(length: usize, pc: &Pc) -> &mut Self {
-        pc.protect_and_transmute(unsafe {
-            Rf_allocVector(STRSXP, length.try_into().stop_str(TOO_LONG))
-        })
+        unsafe {
+            pc.protect_and_transmute(Rf_allocVector(STRSXP, length.try_into().stop_str(TOO_LONG)))
+        }
     }
 
     #[allow(clippy::mut_from_ref)]
@@ -2615,7 +2889,8 @@ macro_rules! rmatrix {
                 value: $tipe2,
             ) -> Result<(), &'static str> {
                 let index = self.index(index);
-                self.transmute_mut::<RVector, $tipe>().set(index, value)
+                self.transmute_mut::<RObject<RVector, $tipe>>()
+                    .set(index, value)
             }
         }
     };
@@ -2636,7 +2911,8 @@ impl RObject<RMatrix, bool> {
     /// Set the value at a certain index in a logical RMatrix an an i32.
     pub fn set_bool(&mut self, index: (usize, usize), value: bool) -> Result<(), &'static str> {
         let index = self.index(index);
-        self.transmute_mut::<RVector, bool>().set_bool(index, value)
+        self.transmute_mut::<RObject<RVector, bool>>()
+            .set_bool(index, value)
     }
 }
 
@@ -2652,7 +2928,7 @@ impl RObject<RMatrix, RCharacter> {
             let _ = vector.set(i, value);
         }
         vector.set_attribute(RObject::<RSymbol>::dim(), [nrow, ncol].to_r(pc));
-        vector.transmute_mut::<RMatrix, RCharacter>()
+        vector.transmute_mut::<RObject<RMatrix, RCharacter>>()
     }
 
     pub fn from_slice<'a>(
@@ -2672,7 +2948,7 @@ impl RObject<RMatrix, RCharacter> {
             let _ = vector.set(i, v);
         }
         vector.set_attribute(RObject::<RSymbol>::dim(), [nrow, ncol].to_r(pc));
-        Ok(vector.transmute_mut::<RMatrix, RCharacter>())
+        Ok(vector.transmute_mut::<RObject<RMatrix, RCharacter>>())
     }
 
     pub fn from_iter<'a, T>(iter: T, nrow: usize, pc: &'a Pc) -> Result<&'a mut Self, &'static str>
@@ -2691,7 +2967,7 @@ impl RObject<RMatrix, RCharacter> {
             let _ = vector.set(i, v);
         }
         vector.set_attribute(RObject::<RSymbol>::dim(), [nrow, ncol].to_r(pc));
-        Ok(vector.transmute_mut::<RMatrix, RCharacter>())
+        Ok(vector.transmute_mut::<RObject<RMatrix, RCharacter>>())
     }
 
     /// Get the value at a certain index in a character RMatrix.
@@ -2703,7 +2979,7 @@ impl RObject<RMatrix, RCharacter> {
     /// Set the value at a certain index in a character RMatrix.
     pub fn set(&mut self, index: (usize, usize), value: &str) -> Result<(), &'static str> {
         let index = self.index(index);
-        self.transmute_mut::<RVector, RCharacter>()
+        self.transmute_mut::<RObject<RVector, RCharacter>>()
             .set(index, value)
     }
 }
@@ -2759,9 +3035,9 @@ impl<RMode> RListMap<'_, RMode> {
 impl RObject<RList> {
     #[allow(clippy::mut_from_ref)]
     pub fn new(length: usize, pc: &Pc) -> &mut Self {
-        pc.protect_and_transmute(unsafe {
-            Rf_allocVector(VECSXP, length.try_into().stop_str(TOO_LONG))
-        })
+        unsafe {
+            pc.protect_and_transmute(Rf_allocVector(VECSXP, length.try_into().stop_str(TOO_LONG)))
+        }
     }
 
     #[allow(clippy::mut_from_ref)]

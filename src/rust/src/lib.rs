@@ -6,8 +6,8 @@ use roxido::*;
 
 #[roxido]
 fn convolve4(a: &RObject<RVector, f64>, b: &RObject<RVector, f64>) {
-    let a = a.as_2vector2().stop_str("'a' should be a vector");
-    let b = b.as_2vector2().stop_str("'b' should be a vector");
+    let a = a.as_2robject2().as_vector().stop().as_f64().stop();
+    let b = b.as_2robject2().as_vector().stop().as_f64().stop();
 
     let vec_3 = RObject::<RVector, f64>::from_value(5.0, a.len() + b.len() - 1, pc);
 
@@ -64,6 +64,20 @@ fn convolve4(a: &RObject<RVector, f64>, b: &RObject<RVector, f64>) {
 #[roxido]
 fn convolve2(a: &RObject<RVector>, b: &RObject<RVector>) {
     let vec = RObject::<RVector, f64>::from_value(0.0, a.len() + b.len() - 1, pc);
+    let ab = vec.slice_mut();
+    for (i, ai) in a.to_f64(pc).slice().iter().enumerate() {
+        for (j, bj) in b.to_f64(pc).slice().iter().enumerate() {
+            ab[i + j] += ai * bj;
+        }
+    }
+    vec.sexp()
+}
+
+#[roxido]
+fn convolve22(a: &RObject<RVector>, b: &RObject<RVector>) {
+    let a = a.as_2robject2().as_vector().stop();
+    let b = b.as_2robject2().as_vector().stop();
+    let vec = R2Vector2::from_value(0.0, a.len() + b.len() - 1, pc);
     let ab = vec.slice_mut();
     for (i, ai) in a.to_f64(pc).slice().iter().enumerate() {
         for (j, bj) in b.to_f64(pc).slice().iter().enumerate() {
