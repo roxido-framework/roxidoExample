@@ -71,18 +71,6 @@ fn convolve2(a: &RObject<RVector>, b: &RObject<RVector>) {
 }
 
 #[roxido]
-fn convolve22(a: &RVector, b: &RVector) {
-    let vec = R2Vector2::from_value(0.0, a.len() + b.len() - 1, pc);
-    let ab = vec.slice_mut();
-    for (i, ai) in a.to_f64(pc).slice().iter().enumerate() {
-        for (j, bj) in b.to_f64(pc).slice().iter().enumerate() {
-            ab[i + j] += ai * bj;
-        }
-    }
-    vec.sexp()
-}
-
-#[roxido]
 fn convolve23(a: &[f64], b: &[f64]) {
     let vec = R2Vector2::from_value(0.0, a.len() + b.len() - 1, pc);
     let ab = vec.slice_mut();
@@ -96,14 +84,14 @@ fn convolve23(a: &[f64], b: &[f64]) {
 
 #[roxido]
 fn add(a: f64, b: f64) {
-    let c = (a + b).to_2r(pc);
-    c.sexp()
+    a + b
 }
 
 #[roxido]
 fn add2(c: &str) {
-    let c = c.to_2r(pc);
-    c.sexp()
+    // let c = c.to_2r(pc);
+    // c.sexp()
+    c
 }
 
 #[roxido]
@@ -113,7 +101,56 @@ fn add3(c: &RScalar) {
 
 #[roxido]
 fn zero(f: &RObject<RFunction>, guess1: f64, guess2: f64, tol: f64) {
-    rprintln!("{}", 3);
+    if !tol.is_finite() || tol <= 0.0 {
+        stop!("'tol' must be a strictly positive value.");
+    }
+    let x_rval = 0.0.to_r(pc);
+    let mut g = |x: f64| {
+        x_rval.set(x);
+        let Ok(fx) = f.call1(x_rval, pc) else {
+            stop!("Error in function evaluation.");
+        };
+        let fx = fx
+            .as_scalar()
+            .stop_str("Unexpected return value from function.")
+            .f64();
+        if !fx.is_finite() {
+            stop!("Non-finite return value from function.");
+        }
+        fx
+    };
+    let (mut x0, mut x1) = (guess1, guess2);
+    let mut f0 = g(x0);
+    if f0 == 0.0 {
+        return x0;
+    }
+    let f1 = g(x1);
+    if f1 == 0.0 {
+        return x1;
+    }
+    if f0 * f1 > 0.0 {
+        stop!("Oops, guesses1 and guesses2 have the same sign.");
+    }
+    loop {
+        let xc = 0.5 * (x0 + x1);
+        if (x0 - x1).abs() < tol {
+            return xc;
+        }
+        let fc = g(xc);
+        if fc == 0.0 {
+            return xc;
+        }
+        if f0 * fc > 0.0 {
+            x0 = xc;
+            f0 = fc;
+        } else {
+            x1 = xc;
+        }
+    }
+}
+
+#[roxido]
+fn zero2(f: &RFunction, guess1: f64, guess2: f64, tol: f64) {
     if !tol.is_finite() || tol <= 0.0 {
         stop!("'tol' must be a strictly positive value.");
     }

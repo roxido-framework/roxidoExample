@@ -162,6 +162,30 @@ pub trait IsRObject: Sized {
     fn clone<'a>(&self, pc: &'a Pc) -> &'a mut Self {
         unsafe { pc.protect_and_transmute(Rf_duplicate(self.sexp())) }
     }
+
+    /// Get the class or classes of the data in an RObject.
+    fn get_class(&self) -> &R2Vector2<char> {
+        unsafe { Rf_getAttrib(self.sexp(), R2Symbol2::class().sexp()).transmute(self) }
+    }
+
+    /// Set the class or classes of the data for an RObject.
+    fn set_class(&mut self, names: &R2Vector2<char>) {
+        unsafe {
+            Rf_classgets(self.sexp(), names.sexp());
+        }
+    }
+
+    /// Get an attribute.
+    fn get_attribute(&self, which: &R2Symbol2) -> &R2Object2 {
+        unsafe { Rf_getAttrib(self.sexp(), which.sexp()).transmute(self) }
+    }
+
+    /// Set an attribute.
+    fn set_attribute<RTypeValue, RModeValue>(&mut self, which: &R2Symbol2, value: &R2Object2) {
+        unsafe {
+            Rf_setAttrib(self.sexp(), which.sexp(), value.sexp());
+        }
+    }
 }
 
 macro_rules! baseline {
@@ -930,30 +954,6 @@ impl R2Object2 {
     pub fn is_symbol(&self) -> bool {
         unsafe { TYPEOF(self.sexp()) == SYMSXP as i32 }
     }
-
-    /// Get the class or classes of the data in an RObject.
-    pub fn get_class(&self) -> &R2Vector2<char> {
-        unsafe { Rf_getAttrib(self.sexp(), R2Symbol2::class().sexp()).transmute(self) }
-    }
-
-    /// Set the class or classes of the data for an RObject.
-    pub fn set_class(&mut self, names: &R2Vector2<char>) {
-        unsafe {
-            Rf_classgets(self.sexp(), names.sexp());
-        }
-    }
-
-    /// Get an attribute.
-    pub fn get_attribute(&self, which: &R2Symbol2) -> &R2Object2 {
-        unsafe { Rf_getAttrib(self.sexp(), which.sexp()).transmute(self) }
-    }
-
-    /// Set an attribute.
-    pub fn set_attribute<RTypeValue, RModeValue>(&mut self, which: &R2Symbol2, value: &R2Object2) {
-        unsafe {
-            Rf_setAttrib(self.sexp(), which.sexp(), value.sexp());
-        }
-    }
 }
 
 impl RObject<RError> {
@@ -1341,6 +1341,7 @@ rarray!(u8, RAWSXP);
 rarray!(bool, LGLSXP);
 rarray!(RCharacter, STRSXP);
 
+// DBD: Ready to delete.
 impl RObject<RFunction> {
     fn eval(expression: SEXP, pc: &Pc) -> Result<&RObject, i32> {
         let expression = pc.protect(expression);
@@ -1438,6 +1439,100 @@ impl RObject<RFunction> {
     }
 }
 
+impl R2Function2 {
+    fn eval(expression: SEXP, pc: &Pc) -> Result<&R2Object2, i32> {
+        let expression = pc.protect(expression);
+        let mut p_out_error: i32 = 0;
+        let sexp = pc.protect(unsafe {
+            R_tryEval(expression, R_GetCurrentEnv(), &mut p_out_error as *mut i32)
+        });
+        match p_out_error {
+            0 => Ok(unsafe { sexp.transmute(pc) }),
+            e => Err(e),
+        }
+    }
+
+    /// Evaluate a function with 0 parameters.
+    pub fn call0<'a>(&self, pc: &'a Pc) -> Result<&'a R2Object2, i32> {
+        let expression = unsafe { Rf_lang1(self.sexp()) };
+        Self::eval(expression, pc)
+    }
+
+    /// Evaluate a function with 1 parameter.
+    pub fn call1<'a>(&self, arg1: &impl IsRObject, pc: &'a Pc) -> Result<&'a R2Object2, i32> {
+        let expression = unsafe { Rf_lang2(self.sexp(), arg1.sexp()) };
+        Self::eval(expression, pc)
+    }
+
+    /// Evaluate a function with 2 parameters.
+    pub fn call2<'a>(
+        &self,
+        arg1: &impl IsRObject,
+        arg2: &impl IsRObject,
+        pc: &'a Pc,
+    ) -> Result<&'a R2Object2, i32> {
+        let expression = unsafe { Rf_lang3(self.sexp(), arg1.sexp(), arg2.sexp()) };
+        Self::eval(expression, pc)
+    }
+
+    /// Evaluate a function with 3 parameters.
+    pub fn call3<'a>(
+        &self,
+        arg1: &impl IsRObject,
+        arg2: &impl IsRObject,
+        arg3: &impl IsRObject,
+        pc: &'a Pc,
+    ) -> Result<&'a R2Object2, i32> {
+        let expression = unsafe { Rf_lang4(self.sexp(), arg1.sexp(), arg2.sexp(), arg3.sexp()) };
+        Self::eval(expression, pc)
+    }
+
+    /// Evaluate a function with 4 parameters.
+    pub fn call4<'a>(
+        &self,
+        arg1: &impl IsRObject,
+        arg2: &impl IsRObject,
+        arg3: &impl IsRObject,
+        arg4: &impl IsRObject,
+        pc: &'a Pc,
+    ) -> Result<&'a R2Object2, i32> {
+        let expression = unsafe {
+            Rf_lang5(
+                self.sexp(),
+                arg1.sexp(),
+                arg2.sexp(),
+                arg3.sexp(),
+                arg4.sexp(),
+            )
+        };
+        Self::eval(expression, pc)
+    }
+
+    /// Evaluate a function with 5 parameters.
+    pub fn call5<'a>(
+        &self,
+        arg1: &impl IsRObject,
+        arg2: &impl IsRObject,
+        arg3: &impl IsRObject,
+        arg4: &impl IsRObject,
+        arg5: &impl IsRObject,
+        pc: &'a Pc,
+    ) -> Result<&'a R2Object2, i32> {
+        let expression = unsafe {
+            Rf_lang6(
+                self.sexp(),
+                arg1.sexp(),
+                arg2.sexp(),
+                arg3.sexp(),
+                arg4.sexp(),
+                arg5.sexp(),
+            )
+        };
+        Self::eval(expression, pc)
+    }
+}
+
+// Ready to delete
 impl<RMode> RObject<RScalar, RMode> {
     /// Check if appropriate to characterize as an f64.
     pub fn f64(&self) -> f64 {

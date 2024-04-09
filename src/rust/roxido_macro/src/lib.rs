@@ -282,14 +282,6 @@ fn roxido_fn(options: Vec<NestedMeta>, item_fn: syn::ItemFn) -> TokenStream {
                                     "RObject" => {
                                         as_robject(&mut generated_statements, mutable);
                                     },
-                                    "RSymbol" => {
-                                        as_robject(&mut generated_statements, mutable);
-                                        if mutable {
-                                            generated_statements.push(parse_quote! { let #name = #name.as_symbol_mut().stop_str(concat!("'", stringify!(#name),"' is expected to be a symbol")); });
-                                        } else {
-                                            generated_statements.push(parse_quote! { let #name = #name.as_symbol().stop_str(concat!("'", stringify!(#name),"' is expected to be a symbol")); });
-                                        }
-                                    },
                                     "RList" => {
                                         as_robject(&mut generated_statements, mutable);
                                         if mutable {
@@ -320,6 +312,14 @@ fn roxido_fn(options: Vec<NestedMeta>, item_fn: syn::ItemFn) -> TokenStream {
                                             generated_statements.push(parse_quote! { let #name = #name.as_external_ptr_mut().stop_str(concat!("'", stringify!(#name),"' is expected to be a external pointer")); });
                                         } else {
                                             generated_statements.push(parse_quote! { let #name = #name.as_external_ptr().stop_str(concat!("'", stringify!(#name),"' is expected to be a external pointer")); });
+                                        }
+                                    },
+                                    "RSymbol" => {
+                                        as_robject(&mut generated_statements, mutable);
+                                        if mutable {
+                                            generated_statements.push(parse_quote! { let #name = #name.as_symbol_mut().stop_str(concat!("'", stringify!(#name),"' is expected to be a symbol")); });
+                                        } else {
+                                            generated_statements.push(parse_quote! { let #name = #name.as_symbol().stop_str(concat!("'", stringify!(#name),"' is expected to be a symbol")); });
                                         }
                                     },
                                     x if x.starts_with("RScalar") => {
