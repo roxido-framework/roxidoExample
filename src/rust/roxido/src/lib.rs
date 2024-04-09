@@ -1652,7 +1652,7 @@ impl<RMode> RObject<RScalar, RMode> {
             if x == i32::MIN {
                 Err("Equals R's NA for integers")
             } else {
-                Ok(x != 0)
+                Ok(R::is_true(x))
             }
         } else if self.is_f64() {
             let y = unsafe { Rf_asReal(self.sexp()) };
@@ -1664,13 +1664,13 @@ impl<RMode> RObject<RScalar, RMode> {
                 Ok(y != 0.0)
             }
         } else if self.is_u8() {
-            Ok(unsafe { Rf_asInteger(self.sexp()) } != 0)
+            Ok(unsafe { R::is_true(Rf_asInteger(self.sexp())) })
         } else if self.is_bool() {
             let y = unsafe { Rf_asLogical(self.sexp()) };
             if y == i32::MIN {
                 Err("Equals R's NA for logical")
             } else {
-                Ok(y != 0)
+                Ok(R::is_true(y))
             }
         } else {
             Err("Unsupported R type")
@@ -1851,7 +1851,7 @@ impl R2Scalar2 {
             if x == i32::MIN {
                 Err("Equals R's NA for integers")
             } else {
-                Ok(x != 0)
+                Ok(R::is_true(x))
             }
         } else if self.is_f64() {
             let y = unsafe { Rf_asReal(self.sexp()) };
@@ -1863,13 +1863,13 @@ impl R2Scalar2 {
                 Ok(y != 0.0)
             }
         } else if self.is_u8() {
-            Ok(unsafe { Rf_asInteger(self.sexp()) } != 0)
+            Ok(R::is_true(unsafe { Rf_asInteger(self.sexp()) }))
         } else if self.is_bool() {
             let y = unsafe { Rf_asLogical(self.sexp()) };
             if y == i32::MIN {
                 Err("Equals R's NA for logical")
             } else {
-                Ok(y != Rboolean_FALSE as i32)
+                Ok(R::is_true(y))
             }
         } else {
             Err("Unsupported R type")
@@ -1954,13 +1954,7 @@ r2scalar2!(u8, Rf_ScalarRaw);
 impl RScalarConstructor<bool> for R2Scalar2<bool> {
     #[allow(clippy::mut_from_ref)]
     fn from_value(value: bool, pc: &Pc) -> &mut Self {
-        unsafe {
-            pc.protect_and_transmute(Rf_ScalarLogical(if value {
-                Rboolean_TRUE as i32
-            } else {
-                Rboolean_FALSE as i32
-            }))
-        }
+        unsafe { pc.protect_and_transmute(Rf_ScalarLogical(R::as_logical(value))) }
     }
 }
 
@@ -2006,22 +2000,12 @@ rscalar!(bool, i32, Rf_ScalarLogical, LOGICAL_ELT, SET_LOGICAL_ELT);
 impl RObject<RScalar, bool> {
     /// Get the value at a certain index in a logical RVector.
     pub fn get_bool(&self) -> bool {
-        unsafe { LOGICAL_ELT(self.sexp(), 0) == Rboolean_TRUE as i32 }
+        R::is_true(unsafe { LOGICAL_ELT(self.sexp(), 0) })
     }
 
     /// Set the value at a certain index in a logical RVector.
     pub fn set_bool(&mut self, value: bool) {
-        unsafe {
-            SET_LOGICAL_ELT(
-                self.sexp(),
-                0,
-                if value {
-                    Rboolean_TRUE as i32
-                } else {
-                    Rboolean_FALSE as i32
-                },
-            )
-        }
+        unsafe { SET_LOGICAL_ELT(self.sexp(), 0, R::as_logical(value)) }
     }
 }
 
@@ -2425,12 +2409,12 @@ pub trait R2FromIterator2<T> {
         T: 'b;
 }
 
-pub trait RGetSet<T: ?Sized, I> {
+pub trait RGetSet<T, I> {
     /// Get the value at a certain index in an $tipe RVector.
-    fn get(&self, index: I) -> Result<&T, &'static str>;
+    fn get(&self, index: I) -> Result<T, &'static str>;
 
     /// Set the value at a certain index in an $tipe RVector.
-    fn set(&mut self, index: I, value: &T) -> Result<(), &'static str>;
+    fn set(&mut self, index: I, value: T) -> Result<(), &'static str>;
 }
 
 pub trait RGetSet0<T> {
@@ -2495,7 +2479,7 @@ pub trait RVectorConstructors<T> {
 }
 
 macro_rules! r2vector2 {
-    ($tipe:ty, $code:expr, $ptr:expr, $set:expr) => {
+    ($tipe:ty, $code:expr, $ptr:expr, $get:expr, $set:expr) => {
         impl R2FromIterator2<$tipe> for R2Vector2<$tipe> {
             fn from_iter1<T>(iter: T, pc: &Pc) -> &mut Self
             where
@@ -2524,17 +2508,18 @@ macro_rules! r2vector2 {
 
         impl RGetSet<$tipe, usize> for R2Vector2<$tipe> {
             /// Get the value at a certain index in an $tipe RVector.
-            fn get(&self, index: usize) -> Result<&$tipe, &'static str> {
-                match usize::try_from(index) {
-                    Ok(index) => self.slice().get(index).ok_or("Index out of bounds"),
-                    Err(_) => Err("Invalid index"),
+            fn get(&self, index: usize) -> Result<$tipe, &'static str> {
+                if index < self.len() {
+                    Ok(unsafe { $get(self.sexp(), index.try_into().unwrap()) })
+                } else {
+                    Err("Index out of bounds")
                 }
             }
 
             /// Set the value at a certain index in an $tipe RVector.
-            fn set(&mut self, index: usize, value: &$tipe) -> Result<(), &'static str> {
+            fn set(&mut self, index: usize, value: $tipe) -> Result<(), &'static str> {
                 if index < self.len() {
-                    unsafe { $set(self.sexp(), index.try_into().unwrap(), *value) };
+                    unsafe { $set(self.sexp(), index.try_into().unwrap(), value) };
                     Ok(())
                 } else {
                     Err("Index out of bounds")
@@ -2576,9 +2561,9 @@ macro_rules! r2vector2 {
     };
 }
 
-r2vector2!(f64, REALSXP, REAL, SET_REAL_ELT);
-r2vector2!(i32, INTSXP, INTEGER, SET_INTEGER_ELT);
-r2vector2!(u8, RAWSXP, RAW, SET_RAW_ELT);
+r2vector2!(f64, REALSXP, REAL, REAL_ELT, SET_REAL_ELT);
+r2vector2!(i32, INTSXP, INTEGER, INTEGER_ELT, SET_INTEGER_ELT);
+r2vector2!(u8, RAWSXP, RAW, RAW_ELT, SET_RAW_ELT);
 
 impl R2FromIterator2<bool> for R2Vector2<bool> {
     fn from_iter1<T>(iter: T, pc: &Pc) -> &mut Self
@@ -2608,28 +2593,21 @@ impl R2FromIterator2<bool> for R2Vector2<bool> {
 
 impl RGetSet<bool, usize> for R2Vector2<bool> {
     /// Get the value at a certain index in an $tipe RVector.
-    fn get(&self, index: usize) -> Result<&bool, &'static str> {
+    fn get(&self, index: usize) -> Result<bool, &'static str> {
         if index < self.len() {
             let value = unsafe { LOGICAL_ELT(self.sexp(), index.try_into().unwrap()) };
-            if value != Rboolean_FALSE as i32 && !R::is_na_bool(value) {
-                Ok(&true)
-            } else {
-                Ok(&false)
-            }
+            Ok(R::is_true(value))
         } else {
             Err("Index out of bounds")
         }
     }
 
     /// Set the value at a certain index in an $tipe RVector.
-    fn set(&mut self, index: usize, value: &bool) -> Result<(), &'static str> {
+    fn set(&mut self, index: usize, value: bool) -> Result<(), &'static str> {
         if index < self.len() {
-            let value = if *value {
-                Rboolean_TRUE as i32
-            } else {
-                Rboolean_FALSE as i32
+            unsafe {
+                SET_LOGICAL_ELT(self.sexp(), index.try_into().unwrap(), R::as_logical(value))
             };
-            unsafe { SET_LOGICAL_ELT(self.sexp(), index.try_into().unwrap(), value) };
             Ok(())
         } else {
             Err("Index out of bounds")
@@ -2681,8 +2659,8 @@ impl RVectorConstructors<bool> for R2Vector2<bool> {
     }
 }
 
-impl RGetSet<str, usize> for R2Vector2<char> {
-    fn get(&self, index: usize) -> Result<&str, &'static str> {
+impl R2Vector2<char> {
+    pub fn get(&self, index: usize) -> Result<&str, &'static str> {
         if index < self.len() {
             self.get_unchecked(index)
         } else {
@@ -2690,7 +2668,7 @@ impl RGetSet<str, usize> for R2Vector2<char> {
         }
     }
 
-    fn set(&mut self, index: usize, value: &str) -> Result<(), &'static str> {
+    pub fn set(&mut self, index: usize, value: &str) -> Result<(), &'static str> {
         if index < self.len() {
             self.set_unchecked(index, value);
             Ok(())
@@ -2698,9 +2676,7 @@ impl RGetSet<str, usize> for R2Vector2<char> {
             Err("Index out of bounds")
         }
     }
-}
 
-impl R2Vector2<char> {
     fn get_unchecked(&self, index: usize) -> Result<&str, &'static str> {
         let sexp = unsafe { STRING_ELT(self.sexp(), index.try_into().unwrap()) };
         let c_str = unsafe { CStr::from_ptr(R_CHAR(sexp) as *const c_char) };
@@ -2770,16 +2746,12 @@ impl RVectorConstructors<&str> for R2Vector2<char> {
 impl RObject<RVector, bool> {
     /// Get the value at a certain index in a logical RVector.
     pub fn get_bool(&self, index: usize) -> Result<bool, &'static str> {
-        self.get_engine(index, LOGICAL_ELT).map(|x| x != 0)
+        self.get_engine(index, LOGICAL_ELT).map(|x| R::is_true(x))
     }
 
     /// Set the value at a certain index in a logical RVector.
     pub fn set_bool(&mut self, index: usize, value: bool) -> Result<(), &'static str> {
-        let value = if value {
-            Rboolean_TRUE as i32
-        } else {
-            Rboolean_FALSE as i32
-        };
+        let value = R::as_logical(value);
         self.set_engine(index, value, SET_LOGICAL_ELT)
     }
 }
@@ -3683,11 +3655,7 @@ macro_rules! r_from_scalar {
 r_from_scalar!(f64, f64, |x| x);
 r_from_scalar!(i32, i32, |x| x);
 r_from_scalar!(u8, u8, |x| x);
-r_from_scalar!(bool, bool, |x: bool| if x {
-    Rboolean_TRUE as i32
-} else {
-    Rboolean_FALSE as i32
-});
+r_from_scalar!(bool, bool, |x: bool| R::as_logical(x));
 r_from_scalar!(i32, usize, |x: usize| x.try_into().stop_str(TOO_LONG));
 
 impl<'a> ToR<'a, RScalar, RCharacter> for &str {
@@ -3713,16 +3681,7 @@ r_from_slice!(u8);
 
 impl<'a> ToR<'a, RVector, bool> for &[bool] {
     fn to_r(&self, pc: &'a Pc) -> &'a mut RObject<RVector, bool> {
-        RObject::<RVector, bool>::from_iter(
-            self.iter().map(|x| {
-                if *x {
-                    Rboolean_TRUE as i32
-                } else {
-                    Rboolean_FALSE as i32
-                }
-            }),
-            pc,
-        )
+        RObject::<RVector, bool>::from_iter(self.iter().map(|x| R::as_logical(*x)), pc)
     }
 }
 
