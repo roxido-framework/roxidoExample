@@ -3270,6 +3270,7 @@ impl RObject<RList, RDataFrame> {
     }
 }
 
+// DBD: Ready to delete
 impl RObject<RExternalPtr> {
     /// Move Rust object to an R external pointer.
     ///
@@ -3412,6 +3413,151 @@ impl RObject<RExternalPtr> {
     ///
     pub fn tag(&self) -> &RObject {
         self.transmute_sexp(unsafe { R_ExternalPtrTag(self.sexp()) })
+    }
+}
+
+impl R2ExternalPtr2 {
+    /// Move Rust object to an R external pointer.
+    ///
+    /// This *method* moves a Rust object to an R external pointer and then, as far as Rust is concerned, leaks the memory.
+    /// Thus the programmer is then responsible to release the memory by calling [`RObject::decode_val`].
+    ///
+    #[allow(clippy::mut_from_ref)]
+    pub fn encode<'a, T>(x: T, tag: &str, pc: &'a Pc) -> &'a mut Self {
+        Self::encode_full(x, tag.to_2r(pc), true, pc)
+    }
+
+    /// Move Rust object to an R external pointer.
+    ///
+    /// This *method* moves a Rust object to an R external pointer and then, as far as Rust is concerned, leaks the memory.
+    /// Thus the programmer is then responsible to release the memory by calling [`RObject::decode_val`].
+    ///
+    #[allow(clippy::mut_from_ref)]
+    pub fn encode_full<'a, T>(
+        x: T,
+        tag: &impl IsRObject,
+        managed_by_r: bool,
+        pc: &'a Pc,
+    ) -> &'a mut Self {
+        unsafe {
+            let ptr = Box::into_raw(Box::new(x));
+            let sexp = pc.protect(R_MakeExternalPtr(
+                ptr as *mut c_void,
+                tag.sexp(),
+                R_NilValue,
+            ));
+            if managed_by_r {
+                unsafe extern "C" fn free<S>(sexp: SEXP) {
+                    let addr = R_ExternalPtrAddr(sexp);
+                    if addr.as_ref().is_none() {
+                        return;
+                    }
+                    let _ = Box::from_raw(addr as *mut S);
+                    R_ClearExternalPtr(sexp);
+                }
+                Rf_setAttrib(sexp, R_AtsignSymbol, R_AtsignSymbol);
+                R_RegisterCFinalizerEx(sexp, Some(free::<T>), 0);
+            }
+            sexp.transmute_mut(pc)
+        }
+    }
+
+    /// Check if an external pointer is managed by R.
+    pub fn is_managed_by_r(&self) -> bool {
+        unsafe { Rf_getAttrib(self.sexp(), R_AtsignSymbol) == R_AtsignSymbol }
+    }
+
+    /// Move an R external pointer to a Rust object.
+    ///
+    /// This method moves an R external pointer created by [`RObject::external_ptr`] to a Rust object and Rust will then manage its memory.
+    ///
+    pub fn decode_val<T>(&self) -> Result<T, &'static str> {
+        if self.is_managed_by_r() {
+            return Err("External pointer is managed by R");
+        }
+        unsafe {
+            let addr = R_ExternalPtrAddr(self.sexp());
+            if addr.as_ref().is_none() {
+                return Err("External pointer was already decoded by value");
+            }
+            R_ClearExternalPtr(self.sexp());
+            Ok(*Box::from_raw(addr as *mut T))
+        }
+    }
+
+    /// Obtain a reference to a Rust object from an R external pointer.
+    ///
+    /// This method obtains a reference to a Rust object from an R external pointer created by [`RObject::external_ptr`].
+    ///
+    pub fn decode_ref<T>(&self) -> &T {
+        unsafe {
+            let ptr = R_ExternalPtrAddr(self.sexp()) as *mut T;
+            ptr.as_ref().unwrap()
+        }
+    }
+
+    /// Obtain a reference to a Rust object from an R external pointer, pretending a static lifetime.
+    ///
+    /// This method obtains a reference to a Rust object from an R external pointer created by [`RObject::external_ptr`].
+    ///
+    /// # Safety
+    ///
+    /// Despite the use of a static lifetime here, the reference is only valid as long as R's
+    /// garbage collector has not reclaimed the underlying object's memory.
+    pub unsafe fn decode_ref_static<T>(&self) -> &'static T {
+        let ptr = R_ExternalPtrAddr(self.sexp()) as *mut T;
+        ptr.as_ref().unwrap()
+    }
+
+    /// Obtain a mutable reference to a Rust object from an R external pointer.
+    ///
+    /// This method obtains a mutable reference to a Rust object from an R external pointer created by [`RObject::external_ptr`].
+    ///
+    pub fn decode_mut<'a, T>(&mut self) -> &'a mut T {
+        unsafe {
+            let ptr = R_ExternalPtrAddr(self.sexp()) as *mut T;
+            ptr.as_mut().unwrap()
+        }
+    }
+
+    /// Obtain a mutable reference to a Rust object from an R external pointer, pretending a static lifetime.
+    ///
+    /// This method obtains a mutable reference to a Rust object from an R external pointer created by [`RObject::external_ptr`].
+    ///
+    /// # Safety
+    ///
+    /// Despite the use of a static lifetime here, the reference is only valid as long as R's
+    /// garbage collector has not reclaimed the underlying object's memory.
+    pub unsafe fn decode_mut_static<T>(&mut self) -> &'static mut T {
+        let ptr = R_ExternalPtrAddr(self.sexp()) as *mut T;
+        ptr.as_mut().unwrap()
+    }
+
+    /// Get the memory address of the external pointer.
+    pub fn address(&self) -> *mut c_void {
+        unsafe { R_ExternalPtrAddr(self.sexp()) }
+    }
+
+    /// Register the external pointer to be finalized.
+    ///
+    /// This allows the object to perform cleanup actions when no longer referenced in R.
+    ///
+    pub fn register_finalizer(&self, func: extern "C" fn(sexp: SEXP)) -> Result<(), &'static str> {
+        if self.is_managed_by_r() {
+            return Err("External pointer is managed by R");
+        }
+        unsafe {
+            R_RegisterCFinalizerEx(self.sexp(), Some(func), 0);
+            Ok(())
+        }
+    }
+
+    /// Get tag for an R external pointer.
+    ///
+    /// This method gets the tag associated with an R external pointer, which was set by [`Self::external_ptr`].
+    ///
+    pub fn tag(&self) -> &R2Object2 {
+        unsafe { R_ExternalPtrTag(self.sexp()).transmute(self) }
     }
 }
 
