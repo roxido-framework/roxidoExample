@@ -181,7 +181,7 @@ pub trait IsRObject: Sized {
     }
 
     /// Set an attribute.
-    fn set_attribute<RTypeValue, RModeValue>(&mut self, which: &R2Symbol2, value: &R2Object2) {
+    fn set_attribute(&mut self, which: &R2Symbol2, value: &impl IsRObject) {
         unsafe {
             Rf_setAttrib(self.sexp(), which.sexp(), value.sexp());
         }
@@ -2794,6 +2794,141 @@ impl RVectorConstructors<&str> for R2Vector2<char> {
             result.set_unchecked(index, value)
         }
         result
+    }
+}
+
+pub trait RMatrixConstructors<T> {
+    #[allow(clippy::mut_from_ref)]
+    fn new(dim: [usize; 2], pc: &Pc) -> &mut Self;
+
+    #[allow(clippy::mut_from_ref)]
+    fn from_value(value: T, dim: [usize; 2], pc: &Pc) -> &mut Self;
+}
+
+macro_rules! r2matrix2 {
+    ($tipe:ty, $code:expr, $get:expr, $set:expr) => {
+        impl RGetSet<$tipe, [usize; 2]> for R2Matrix2<$tipe> {
+            /// Get the value at a certain index in an $tipe RMatrix.
+            fn get(&self, index: [usize; 2]) -> Result<$tipe, &'static str> {
+                let index = self.index(index, None);
+                if index < self.len() {
+                    Ok(unsafe { $get(self.sexp(), index.try_into().unwrap()) })
+                } else {
+                    Err("Index out of bounds")
+                }
+            }
+
+            /// Set the value at a certain index in an $tipe RMatrix.
+            fn set(&mut self, index: [usize; 2], value: $tipe) -> Result<(), &'static str> {
+                let index = self.index(index, None);
+                if index < self.len() {
+                    unsafe { $set(self.sexp(), index.try_into().unwrap(), value) };
+                    Ok(())
+                } else {
+                    Err("Index out of bounds")
+                }
+            }
+        }
+
+        impl RMatrixConstructors<$tipe> for R2Matrix2<$tipe> {
+            fn new(dim: [usize; 2], pc: &Pc) -> &mut Self {
+                unsafe {
+                    pc.protect_and_transmute(Rf_allocMatrix(
+                        $code,
+                        dim[0].try_into().stop_str(TOO_LONG),
+                        dim[1].try_into().stop_str(TOO_LONG),
+                    ))
+                }
+            }
+
+            fn from_value(value: $tipe, dim: [usize; 2], pc: &Pc) -> &mut Self {
+                let result = Self::new(dim, pc);
+                let slice = result.slice_mut();
+                slice.fill(value);
+                result
+            }
+        }
+    };
+}
+
+r2matrix2!(f64, REALSXP, REAL_ELT, SET_REAL_ELT);
+
+impl<T> R2Matrix2<T> {
+    /// Returns the number of rows in the RMatrix.
+    pub fn nrow(&self) -> usize {
+        unsafe { Rf_nrows(self.sexp()).try_into().unwrap() }
+    }
+
+    /// Returns the number of columns in the RMatrix.
+    pub fn ncol(&self) -> usize {
+        unsafe { Rf_ncols(self.sexp()).try_into().unwrap() }
+    }
+
+    /// Returns the dimensions of the RMatrix.
+    pub fn dim(&self) -> [usize; 2] {
+        [self.nrow(), self.ncol()]
+    }
+
+    /// Transpose the matrix.
+    #[allow(clippy::mut_from_ref)]
+    pub fn transpose<'a>(&self, pc: &'a Pc) -> &'a mut Self {
+        let transposed = self.clone(pc);
+        let mut dim = transposed.dim();
+        dim.swap(0, 1);
+        let dim2: [i32; 2] = [dim[0].try_into().unwrap(), dim[1].try_into().unwrap()];
+        transposed.set_attribute(R2Symbol2::dim(), dim2.to_2r(pc));
+        unsafe { Rf_copyMatrix(transposed.sexp(), self.sexp(), Rboolean_TRUE) };
+        transposed
+    }
+
+    /// Manipulates the matrix in place to be a vector by dropping the `dim` attribute.
+    pub fn to_vector(&mut self) -> &mut R2Vector2<T> {
+        unsafe { Rf_setAttrib(self.sexp(), R_DimSymbol, R_NilValue).transmute_mut(self) }
+    }
+
+    /// Get the index of a value based on the row and column number.
+    pub fn index(&self, [i, j]: [usize; 2], nrow: Option<usize>) -> usize {
+        let nrow = nrow.unwrap_or_else(|| self.nrow());
+        nrow * j + i
+    }
+
+    /// Get the dimnames of a matrix.
+    pub fn get_dimnames(&self) -> &R2Vector2<char> {
+        unsafe { Rf_getAttrib(self.sexp(), R_DimNamesSymbol).transmute(self) }
+    }
+
+    /// Set the dimnames of a matrix.
+    pub fn set_dimnames(&mut self, dimnames: &R2List2) -> Result<(), &'static str> {
+        match dimnames.get(0) {
+            Ok(rownames) => match rownames.as_vector() {
+                Ok(rownames) => {
+                    if rownames.len() != self.nrow() {
+                        return Err("Row names do not match the number of rows");
+                    }
+                }
+                Err(_) => {
+                    return Err("Row names must be a character vector");
+                }
+            },
+            Err(_) => return Err("No row names element found"),
+        };
+        match dimnames.get(1) {
+            Ok(colnames) => match colnames.as_vector() {
+                Ok(colnames) => {
+                    if colnames.len() != self.ncol() {
+                        return Err("Column names do not match the number of columns");
+                    }
+                }
+                Err(_) => {
+                    return Err("Column names must be a character vector");
+                }
+            },
+            Err(_) => return Err("No column names element found"),
+        };
+        unsafe {
+            Rf_dimnamesgets(self.sexp(), dimnames.sexp());
+        }
+        Ok(())
     }
 }
 
