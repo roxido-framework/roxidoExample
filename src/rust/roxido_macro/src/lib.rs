@@ -614,7 +614,7 @@ fn roxido_fn(options: Vec<NestedMeta>, item_fn: syn::ItemFn) -> TokenStream {
                     let pc = &mut Pc::__private_new();
                     #( #generated_statements )*
                     let mut f = || { #body };
-                    f().to_r(pc).sexp()
+                    f().to_2r(pc).sexp()
                 }));
                 match result {
                     Ok(obj) => obj,
@@ -653,7 +653,7 @@ fn roxido_fn(options: Vec<NestedMeta>, item_fn: syn::ItemFn) -> TokenStream {
                     let pc = &mut Pc::__private_new();
                     #( #generated_statements )*
                     let mut f = || { #body };
-                    f().to_r(pc).sexp()
+                    f().to_2r(pc).sexp()
                 }));
                 match result {
                     Ok(obj) => obj,

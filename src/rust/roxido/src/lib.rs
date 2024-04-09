@@ -2852,6 +2852,8 @@ macro_rules! r2matrix2 {
 }
 
 r2matrix2!(f64, REALSXP, REAL_ELT, SET_REAL_ELT);
+r2matrix2!(i32, INTSXP, INTEGER_ELT, SET_INTEGER_ELT);
+r2matrix2!(u8, RAWSXP, RAW_ELT, SET_RAW_ELT);
 
 impl<T> R2Matrix2<T> {
     /// Returns the number of rows in the RMatrix.
@@ -2925,6 +2927,129 @@ impl<T> R2Matrix2<T> {
             },
             Err(_) => return Err("No column names element found"),
         };
+        unsafe {
+            Rf_dimnamesgets(self.sexp(), dimnames.sexp());
+        }
+        Ok(())
+    }
+}
+
+pub trait RArrayConstructors<T> {
+    #[allow(clippy::mut_from_ref)]
+    fn new<'a>(dim: &[usize], pc: &'a Pc) -> &'a mut Self;
+
+    #[allow(clippy::mut_from_ref)]
+    fn from_value<'a>(value: T, dim: &[usize], pc: &'a Pc) -> &'a mut Self;
+}
+
+macro_rules! r2array2 {
+    ($tipe:ty, $code:expr, $get:expr, $set:expr) => {
+        impl RGetSet<$tipe, &[usize]> for R2Array2<$tipe> {
+            /// Get the value at a certain index in an $tipe RArray.
+            fn get(&self, index: &[usize]) -> Result<$tipe, &'static str> {
+                let index = self.index(index, None);
+                if index < self.len() {
+                    Ok(unsafe { $get(self.sexp(), index.try_into().unwrap()) })
+                } else {
+                    Err("Index out of bounds")
+                }
+            }
+            /// Set the value at a certain index in an $tipe RArray.
+            fn set(&mut self, index: &[usize], value: $tipe) -> Result<(), &'static str> {
+                let index = self.index(index, None);
+                if index < self.len() {
+                    unsafe { $set(self.sexp(), index.try_into().unwrap(), value) };
+                    Ok(())
+                } else {
+                    Err("Index out of bounds")
+                }
+            }
+        }
+        impl RArrayConstructors<$tipe> for R2Array2<$tipe> {
+            fn new<'a>(dim: &[usize], pc: &'a Pc) -> &'a mut Self {
+                let dim = dim
+                    .iter()
+                    .map(|x| i32::try_from(*x).stop_str(TOO_LONG))
+                    .to_2r(pc)
+                    .sexp();
+                unsafe { pc.protect_and_transmute(Rf_allocArray($code, dim)) }
+            }
+            fn from_value<'a>(value: $tipe, dim: &[usize], pc: &'a Pc) -> &'a mut Self {
+                let result = Self::new(dim, pc);
+                let slice = result.slice_mut();
+                slice.fill(value);
+                result
+            }
+        }
+    };
+}
+
+r2array2!(f64, REALSXP, REAL_ELT, SET_REAL_ELT);
+r2array2!(i32, INTSXP, INTEGER_ELT, SET_INTEGER_ELT);
+r2array2!(u8, RAWSXP, RAW_ELT, SET_RAW_ELT);
+
+impl<T> R2Array2<T> {
+    /// Returns the dimensions of the RMatrix.
+    pub fn dim(&self) -> Vec<usize> {
+        let d: &R2Vector2<i32> = unsafe { Rf_getAttrib(self.sexp(), R_DimSymbol).transmute(self) };
+        d.slice().iter().map(|&x| x.try_into().unwrap()).collect()
+    }
+
+    /// Manipulates the matrix in place to be a vector by dropping the `dim` attribute.
+    pub fn to_vector(&mut self) -> &mut R2Vector2<T> {
+        unsafe { Rf_setAttrib(self.sexp(), R_DimSymbol, R_NilValue).transmute_mut(self) }
+    }
+
+    /// Get the index of a value based on the row and column number.
+    pub fn index(&self, index: &[usize], dim: Option<&[usize]>) -> usize {
+        let mut dim_holder: Vec<_> = vec![];
+        let dim = dim.unwrap_or_else(|| {
+            dim_holder = self.dim();
+            &dim_holder[..]
+        });
+        let coef = std::iter::once(&1)
+            .chain(dim[..dim.len() - 1].iter())
+            .scan(1, |prod, d| {
+                *prod = (*prod) * (*d);
+                Some(*prod)
+            });
+        let mut i = 0;
+        for (x, y) in coef.zip(index.iter()) {
+            i += x * (*y);
+        }
+        i
+    }
+
+    /// Get the dimnames of a matrix.
+    pub fn get_dimnames(&self) -> &R2Vector2<char> {
+        unsafe { Rf_getAttrib(self.sexp(), R_DimNamesSymbol).transmute(self) }
+    }
+
+    /// Set the dimnames of a matrix.
+    pub fn set_dimnames(&mut self, dimnames: &R2List2) -> Result<(), String> {
+        let dim = self.dim();
+        if dimnames.len() != dim.len() {
+            return Err(format!(
+                "Length of dimnames is {} whereas the dim is of length {}",
+                dimnames.len(),
+                dim.len()
+            ));
+        }
+        for (i, &len) in dim.iter().enumerate() {
+            match dimnames.get(i).unwrap().as_vector() {
+                Ok(names) => {
+                    if names.len() != len {
+                        return Err(format!("Element {} of the dimnames list has length {}, but the corresponding dimension is {}", i, names.len(), len));
+                    }
+                }
+                Err(_) => {
+                    return Err(format!(
+                        "Element {} of the dimnames list must be a character vector",
+                        i
+                    ));
+                }
+            }
+        }
         unsafe {
             Rf_dimnamesgets(self.sexp(), dimnames.sexp());
         }
@@ -3132,6 +3257,7 @@ impl RObject<RVector, RCharacter> {
     }
 }
 
+// DBD: Ready to delete
 impl<RMode> RObject<RMatrix, RMode> {
     #[allow(clippy::mut_from_ref)]
     fn new_engine(code: u32, nrow: usize, ncol: usize, pc: &Pc) -> &mut Self {
@@ -3223,6 +3349,7 @@ impl<RMode> RObject<RMatrix, RMode> {
     }
 }
 
+// DBD: Ready to delete
 macro_rules! rmatrix {
     ($tipe:ty, $tipe2:ty, $code:expr) => {
         impl RObject<RMatrix, $tipe> {
@@ -3294,6 +3421,7 @@ macro_rules! rmatrix {
     };
 }
 
+// DBD: Ready to delete
 rmatrix!(f64, f64, REALSXP);
 rmatrix!(i32, i32, INTSXP);
 rmatrix!(u8, u8, RAWSXP);
@@ -3938,6 +4066,12 @@ impl To2RScalar2<i32> for usize {
 }
 
 /// Trait for converting objects to RObjects.
+pub trait To2RObject2 {
+    #[allow(clippy::mut_from_ref)]
+    fn to_2r(self, pc: &Pc) -> &impl IsRObject;
+}
+
+/// Trait for converting objects to RObjects.
 pub trait To2RVector2<RMode> {
     #[allow(clippy::mut_from_ref)]
     fn to_2r(self, pc: &Pc) -> &mut R2Vector2<RMode>;
@@ -3977,6 +4111,13 @@ to_2rvector2!(char, &str);
 
 macro_rules! to_2rvector24 {
     ($tipe:ty, $tipe2:ty) => {
+        impl<'a, T: IntoIterator<Item = $tipe2> + ExactSizeIterator> To2RVector33<$tipe> for T {
+            fn to_2r(self, pc: &Pc) -> &mut R2Vector2<$tipe> {
+                R2Vector2::from_iter1(self, pc)
+            }
+        }
+    };
+    ($tipe:ty, $tipe2:ty) => {
         impl<'a, T: IntoIterator<Item = &'a $tipe2> + ExactSizeIterator> To2RVector33<$tipe> for T {
             fn to_2r(self, pc: &Pc) -> &mut R2Vector2<$tipe> {
                 R2Vector2::from_iter2(self, pc)
@@ -3989,6 +4130,18 @@ to_2rvector24!(f64, f64);
 to_2rvector24!(i32, i32);
 to_2rvector24!(u8, u8);
 to_2rvector24!(bool, bool);
+
+impl To2RObject2 for SEXP {
+    fn to_2r(self, pc: &Pc) -> &impl IsRObject {
+        unsafe { self.transmute::<R2Object2, Pc>(pc) }
+    }
+}
+
+impl<T: IsRObject> To2RObject2 for &T {
+    fn to_2r<'a>(self, pc: &'a Pc) -> &'a impl IsRObject {
+        unsafe { self.sexp().transmute::<R2Object2, Pc>(pc) }
+    }
+}
 
 // scalars
 macro_rules! r_from_scalar {

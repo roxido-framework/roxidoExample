@@ -55,7 +55,7 @@ fn convolve4(a: &RVector<f64>, b: &RVector<f64>) {
             ab[i + j] += ai * bj;
         }
     }
-    vec.sexp()
+    vec
 }
 
 #[roxido]
@@ -67,7 +67,7 @@ fn convolve2(a: &RObject<RVector>, b: &RObject<RVector>) {
             ab[i + j] += ai * bj;
         }
     }
-    vec.sexp()
+    vec
 }
 
 #[roxido]
@@ -79,7 +79,7 @@ fn convolve23(a: &[f64], b: &[f64]) {
             ab[i + j] += ai * bj;
         }
     }
-    vec.sexp()
+    vec
 }
 
 #[roxido]
@@ -96,7 +96,7 @@ fn add2(c: &str) {
 
 #[roxido]
 fn add3(c: &RScalar) {
-    c.f64().to_2r(pc).sexp()
+    c.f64()
 }
 
 #[roxido]
