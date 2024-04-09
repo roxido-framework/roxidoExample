@@ -274,13 +274,53 @@ fn roxido_fn(options: Vec<NestedMeta>, item_fn: syn::ItemFn) -> TokenStream {
                                 match path.as_str() {
                                     "str" => {
                                         if mutable {
-                                            panic!("'{}' is a mutable &str, which is not supported for a 'roxido' function.", name_as_string);
+                                            panic!("'{}' is a &mut str, but only &str is supported for a 'roxido' function.", name_as_string);
                                         }
                                         as_rscalar(&mut generated_statements, false);
                                         generated_statements.push(parse_quote! { let #name = #name.str(pc); });
                                     },
                                     "RObject" => {
                                         as_robject(&mut generated_statements, mutable);
+                                    },
+                                    "RSymbol" => {
+                                        as_robject(&mut generated_statements, mutable);
+                                        if mutable {
+                                            generated_statements.push(parse_quote! { let #name = #name.as_symbol_mut().stop_str(concat!("'", stringify!(#name),"' is expected to be a symbol")); });
+                                        } else {
+                                            generated_statements.push(parse_quote! { let #name = #name.as_symbol().stop_str(concat!("'", stringify!(#name),"' is expected to be a symbol")); });
+                                        }
+                                    },
+                                    "RList" => {
+                                        as_robject(&mut generated_statements, mutable);
+                                        if mutable {
+                                            generated_statements.push(parse_quote! { let #name = #name.as_list_mut().stop_str(concat!("'", stringify!(#name),"' is expected to be a list")); });
+                                        } else {
+                                            generated_statements.push(parse_quote! { let #name = #name.as_list().stop_str(concat!("'", stringify!(#name),"' is expected to be a list")); });
+                                        }
+                                    },
+                                    "RDataFrame" => {
+                                        as_robject(&mut generated_statements, mutable);
+                                        if mutable {
+                                            generated_statements.push(parse_quote! { let #name = #name.as_data_frame_mut().stop_str(concat!("'", stringify!(#name),"' is expected to be a data frame")); });
+                                        } else {
+                                            generated_statements.push(parse_quote! { let #name = #name.as_data_frame().stop_str(concat!("'", stringify!(#name),"' is expected to be a data frame")); });
+                                        }
+                                    },
+                                    "RFunction" => {
+                                        as_robject(&mut generated_statements, mutable);
+                                        if mutable {
+                                            generated_statements.push(parse_quote! { let #name = #name.as_function_mut().stop_str(concat!("'", stringify!(#name),"' is expected to be a function")); });
+                                        } else {
+                                            generated_statements.push(parse_quote! { let #name = #name.as_function().stop_str(concat!("'", stringify!(#name),"' is expected to be a function")); });
+                                        }
+                                    },
+                                    "RExternalPtr" => {
+                                        as_robject(&mut generated_statements, mutable);
+                                        if mutable {
+                                            generated_statements.push(parse_quote! { let #name = #name.as_external_ptr_mut().stop_str(concat!("'", stringify!(#name),"' is expected to be a external pointer")); });
+                                        } else {
+                                            generated_statements.push(parse_quote! { let #name = #name.as_external_ptr().stop_str(concat!("'", stringify!(#name),"' is expected to be a external pointer")); });
+                                        }
                                     },
                                     x if x.starts_with("RScalar") => {
                                         as_rscalar(&mut generated_statements, mutable);
@@ -297,9 +337,6 @@ fn roxido_fn(options: Vec<NestedMeta>, item_fn: syn::ItemFn) -> TokenStream {
                                     x if x.starts_with("RArray") => {
                                         as_rscalar(&mut generated_statements, mutable);
                                         as_type(&mut generated_statements, "RArray", x, mutable);
-                                    },
-                                    "RList" => {
-                                        // as_rlist(&mut generated_statements, mutable);
                                     },
                                     x if x.starts_with("RObject") => {
                                         if mutable {
