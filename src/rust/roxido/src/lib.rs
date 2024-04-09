@@ -204,6 +204,7 @@ baseline!(R2List2);
 baseline!(R2DataFrame2);
 baseline!(R2Function2);
 baseline!(R2ExternalPtr2);
+baseline!(R2Error2);
 
 pub trait R2HasLength2: IsRObject {
     /// Returns the length of the RObject.
@@ -223,6 +224,24 @@ pub trait R2HasLength2: IsRObject {
     }
 }
 
+trait RHasNames: R2HasLength2 {
+    /// Get names of values in a RVector.
+    fn get_names(&self) -> &R2Vector2<char> {
+        unsafe { Rf_getAttrib(self.sexp(), R_NamesSymbol).transmute(self) }
+    }
+
+    /// Set names of values in a RVector.
+    fn set_names(&mut self, names: &R2Vector2<char>) -> Result<(), &'static str> {
+        if unsafe { Rf_length(names.sexp()) != Rf_length(self.sexp()) } {
+            return Err("Length of names is not correct");
+        }
+        unsafe {
+            Rf_namesgets(self.sexp(), names.sexp());
+        }
+        Ok(())
+    }
+}
+
 macro_rules! baseline_with_type {
     ($name:ident) => {
         #[repr(C)]
@@ -239,6 +258,13 @@ baseline_with_type!(R2Scalar2);
 baseline_with_type!(R2Vector2);
 baseline_with_type!(R2Matrix2);
 baseline_with_type!(R2Array2);
+
+impl R2HasLength2 for R2List2 {}
+impl R2HasLength2 for R2DataFrame2 {}
+impl RHasNames for R2Scalar2 {}
+impl RHasNames for R2Vector2 {}
+impl RHasNames for R2List2 {}
+impl RHasNames for R2DataFrame2 {}
 
 pub struct Pc {
     counter: std::cell::RefCell<i32>,
@@ -442,6 +468,7 @@ impl R {
     }
 }
 
+// DBD: Ready to delete.
 impl<RType, RMode> IsRObject for RObject<RType, RMode> {}
 
 // DBD: Ready to delete
@@ -956,6 +983,7 @@ impl R2Object2 {
     }
 }
 
+// DBD: Ready to delete
 impl RObject<RError> {
     /// Define a new error.
     ///
@@ -967,6 +995,20 @@ impl RObject<RError> {
         let _ = list.set(1, R::null());
         list.set_class(["error", "condition"].to_r(pc));
         list.transmute_mut()
+    }
+}
+
+impl R2Error2 {
+    /// Define a new error.
+    ///
+    /// This does *not* throw an error.  To throw an R error, simply use `stop!`.
+    ///
+    pub fn new<'a>(message: &str, pc: &'a Pc) -> &'a mut Self {
+        let list = R2List2::with_names(["message", "calls"], pc);
+        let _ = list.set(0, message.to_r(pc));
+        let _ = list.set(1, R::null());
+        list.set_class(["error", "condition"].to_2r(pc));
+        unsafe { list.transmute_mut() }
     }
 }
 
@@ -1272,6 +1314,7 @@ impl<RType: RAtomic + RHasLength, RMode> RObject<RType, RMode> {
     }
 }
 
+// DBD: Ready to delete.
 impl<RMode> RObject<RVector, RMode> {
     #[allow(clippy::mut_from_ref)]
     fn new_engine(code: u32, length: usize, pc: &Pc) -> &mut Self {
@@ -1281,6 +1324,7 @@ impl<RMode> RObject<RVector, RMode> {
     }
 }
 
+// DBD: Ready to delete.
 macro_rules! rslice {
     ($tipe:ty, $tipe2:ty, $code:expr) => {
         impl<RType: RAtomic + RHasLength> RObject<RType, $tipe> {
@@ -1297,11 +1341,13 @@ macro_rules! rslice {
     };
 }
 
+// DBD: Ready to delete.
 rslice!(f64, f64, REAL);
 rslice!(i32, i32, INTEGER);
 rslice!(u8, u8, RAW);
 rslice!(bool, i32, LOGICAL);
 
+// DBD: Ready to delete.
 impl<RType> RObject<RArray, RType> {
     #[allow(clippy::mut_from_ref)]
     fn new_engine<'a>(code: u32, dim: &[usize], pc: &'a Pc) -> &'a mut RObject<RArray, RType> {
@@ -1335,6 +1381,7 @@ macro_rules! rarray {
     };
 }
 
+// DBD: Ready to delete.
 rarray!(f64, REALSXP);
 rarray!(i32, INTSXP);
 rarray!(u8, RAWSXP);
@@ -1532,7 +1579,7 @@ impl R2Function2 {
     }
 }
 
-// Ready to delete
+// DBD: Ready to delete
 impl<RMode> RObject<RScalar, RMode> {
     /// Check if appropriate to characterize as an f64.
     pub fn f64(&self) -> f64 {
@@ -1971,6 +2018,7 @@ impl RScalarConstructor<&str> for R2Scalar2<char> {
     }
 }
 
+// DBD: Ready to delete
 macro_rules! rscalar {
     ($tipe:ty, $tipe2:ty, $code:expr, $code2:expr, $code3:expr) => {
         impl RObject<RScalar, $tipe> {
@@ -1992,11 +2040,13 @@ macro_rules! rscalar {
     };
 }
 
+// DBD: Ready to delete
 rscalar!(f64, f64, Rf_ScalarReal, REAL_ELT, SET_REAL_ELT);
 rscalar!(i32, i32, Rf_ScalarInteger, INTEGER_ELT, SET_INTEGER_ELT);
 rscalar!(u8, u8, Rf_ScalarRaw, RAW_ELT, SET_RAW_ELT);
 rscalar!(bool, i32, Rf_ScalarLogical, LOGICAL_ELT, SET_LOGICAL_ELT);
 
+// DBD: Ready to delete
 impl RObject<RScalar, bool> {
     /// Get the value at a certain index in a logical RVector.
     pub fn get_bool(&self) -> bool {
@@ -2009,6 +2059,7 @@ impl RObject<RScalar, bool> {
     }
 }
 
+// DBD: Ready to delete
 impl RObject<RScalar, RCharacter> {
     #[allow(clippy::mut_from_ref)]
     pub fn from_value<'a>(value: &str, pc: &'a Pc) -> &'a mut Self {
@@ -2036,6 +2087,7 @@ impl RObject<RScalar, RCharacter> {
     }
 }
 
+// DBD: Ready to delete
 impl<RType: ROneDimensional + RHasLength, RMode> RObject<RType, RMode> {
     fn get_engine<T>(
         &self,
@@ -2092,6 +2144,7 @@ impl<RType: ROneDimensional + RHasLength, RMode> RObject<RType, RMode> {
     }
 }
 
+// DBD: Ready to delete
 macro_rules! rvector {
     ($tipe:ty, $tipe2:ty, $code:expr, $code2:expr, $code3:expr) => {
         impl RObject<RVector, $tipe> {
@@ -2138,6 +2191,7 @@ macro_rules! rvector {
     };
 }
 
+// DBD: Ready to delete
 rvector!(f64, f64, REALSXP, REAL_ELT, SET_REAL_ELT);
 rvector!(i32, i32, INTSXP, INTEGER_ELT, SET_INTEGER_ELT);
 rvector!(u8, u8, RAWSXP, RAW_ELT, SET_RAW_ELT);
@@ -2743,6 +2797,144 @@ impl RVectorConstructors<&str> for R2Vector2<char> {
     }
 }
 
+pub struct R2ListMap2<'a> {
+    unused_counter: usize,
+    used: Vec<bool>,
+    robj: &'a R2List2,
+    map: HashMap<&'a str, usize>,
+}
+
+impl R2ListMap2<'_> {
+    /// Find an RObject in the list based on its name.
+    pub fn get(&mut self, name: &str) -> Result<&R2Object2, String> {
+        let Some(index) = self.map.get(name) else {
+            return Err(format!("'{}' not found", name));
+        };
+        if !self.used[*index] {
+            self.unused_counter -= 1;
+            self.used[*index] = true;
+        }
+        Ok(self.robj.get(*index)?)
+    }
+
+    /// Check to see if every RObject in the map has been used.
+    pub fn exhaustive(&self) -> Result<(), String> {
+        if self.unused_counter != 0 {
+            return Err(format!(
+                "Unrecognized elements in list:\n    {}",
+                self.unused_elements().join("\n    ")
+            ));
+        }
+        Ok(())
+    }
+
+    /// Return the number of unused RObjects in the map.
+    pub fn unused_counter(&self) -> usize {
+        self.unused_counter
+    }
+
+    /// Return the names of all unused RObjects in the map.
+    pub fn unused_elements(&self) -> Vec<&str> {
+        let result = self
+            .map
+            .iter()
+            .filter(|(_, index)| !self.used[**index])
+            .map(|(name, _)| *name)
+            .take(self.unused_counter);
+        result.collect()
+    }
+}
+
+macro_rules! rlistlike {
+    ($name:ident) => {
+        impl $name {
+            /// Get the value at a certain index in an $tipe RVector.
+            pub fn get(&self, index: usize) -> Result<&R2Object2, &'static str> {
+                if index < self.len() {
+                    Ok(unsafe {
+                        VECTOR_ELT(self.sexp(), index.try_into().unwrap()).transmute(self)
+                    })
+                } else {
+                    Err("Index out of bounds")
+                }
+            }
+
+            pub fn get_mut(&mut self, index: usize) -> Result<&mut R2Object2, &'static str> {
+                if index < self.len() {
+                    Ok(unsafe {
+                        VECTOR_ELT(self.sexp(), index.try_into().unwrap()).transmute_mut(self)
+                    })
+                } else {
+                    Err("Index out of bounds")
+                }
+            }
+
+            /// Set the value at a certain index in an $tipe RVector.
+            pub fn set(
+                &mut self,
+                index: usize,
+                value: &impl IsRObject,
+            ) -> Result<(), &'static str> {
+                if index < self.len() {
+                    unsafe { SET_VECTOR_ELT(self.sexp(), index.try_into().unwrap(), value.sexp()) };
+                    Ok(())
+                } else {
+                    Err("Index out of bounds")
+                }
+            }
+
+            /// Get a value from the RList based on its key.
+            pub fn get_by_key(&self, key: impl AsRef<str>) -> Result<&R2Object2, String> {
+                let names = self.get_names();
+                for i in 0..names.len() {
+                    if names.get(i).unwrap() == key.as_ref() {
+                        return Ok(self.get(i)?);
+                    }
+                }
+                Err(format!("Could not find '{}' in the list", key.as_ref()))
+            }
+
+            /// Get a value from the RList based on its key.
+            pub fn get_mut_by_key(
+                &mut self,
+                key: impl AsRef<str>,
+            ) -> Result<&mut R2Object2, String> {
+                let names = self.get_names();
+                for i in 0..names.len() {
+                    if names.get(i).unwrap() == key.as_ref() {
+                        return Ok(self.get_mut(i)?);
+                    }
+                }
+                Err(format!("Could not find '{}' in the list", key.as_ref()))
+            }
+
+            /// Convert the list into an [RListMap]
+            ///
+            /// This allows Rust HashMap methods to be used on the contents
+            /// of the list, while still retaining the original list within
+            /// the RListMap struct in the robj field.
+            pub fn make_map(&self) -> R2ListMap2 {
+                let mut map = HashMap::new();
+                let names = self.get_names();
+                let len = names.len();
+                for i in 0..len {
+                    map.insert(names.get(i).unwrap(), i);
+                }
+                R2ListMap2 {
+                    unused_counter: len,
+                    used: vec![false; len],
+                    robj: unsafe { self.transmute() },
+                    map,
+                }
+            }
+        }
+    };
+}
+
+rlistlike!(R2List2);
+rlistlike!(R2DataFrame2);
+
+// DBD: Ready to delete
 impl RObject<RVector, bool> {
     /// Get the value at a certain index in a logical RVector.
     pub fn get_bool(&self, index: usize) -> Result<bool, &'static str> {
@@ -3055,6 +3247,7 @@ impl RObject<RMatrix, RCharacter> {
     }
 }
 
+// DBD: Ready to delete
 pub struct RListMap<'a, RMode> {
     unused_counter: usize,
     used: Vec<bool>,
@@ -3062,6 +3255,7 @@ pub struct RListMap<'a, RMode> {
     map: HashMap<&'a str, usize>,
 }
 
+// DBD: Ready to delete
 impl<RMode> RListMap<'_, RMode> {
     /// Find an RObject in the list based on its name.
     pub fn get(&mut self, name: &str) -> Result<&RObject, String> {
@@ -3103,6 +3297,7 @@ impl<RMode> RListMap<'_, RMode> {
     }
 }
 
+// DBD: Ready to delete
 impl RObject<RList> {
     #[allow(clippy::mut_from_ref)]
     pub fn new(length: usize, pc: &Pc) -> &mut Self {
@@ -3121,6 +3316,25 @@ impl RObject<RList> {
     }
 }
 
+impl R2List2 {
+    #[allow(clippy::mut_from_ref)]
+    pub fn new(length: usize, pc: &Pc) -> &mut Self {
+        unsafe {
+            pc.protect_and_transmute(Rf_allocVector(VECSXP, length.try_into().stop_str(TOO_LONG)))
+        }
+    }
+
+    #[allow(clippy::mut_from_ref)]
+    pub fn with_names<'a, const N: usize>(names: [&str; N], pc: &'a Pc) -> &'a mut Self {
+        let result = Self::new(names.len(), pc);
+        unsafe {
+            Rf_namesgets(result.sexp(), names.to_r(pc).sexp());
+        }
+        result
+    }
+}
+
+// DBD: Ready to delete
 impl<RMode> RObject<RList, RMode> {
     /// Get the value at a certain index in a RList.
     pub fn get(&self, index: usize) -> Result<&RObject, &'static str> {
@@ -3223,6 +3437,7 @@ impl<RMode> RObject<RList, RMode> {
     }
 }
 
+// DBD: Ready to delete
 impl RObject<RList, RDataFrame> {
     /// Get the row names of a RDataFrame.
     pub fn get_rownames(&self) -> &RObject<RVector, RCharacter> {
