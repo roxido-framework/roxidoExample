@@ -546,13 +546,13 @@ fn roxido_fn(options: Vec<NestedMeta>, item_fn: syn::ItemFn) -> TokenStream {
                                             }
                                         }
                                     },
-                                    _ => panic!("11") // error_msg()
+                                    _ => error_msg()
                                 }
                             },
-                            _ => panic!("22") // error_msg(),
+                            _ => error_msg(),
                         }
                     }
-                    _ => panic!("33") // error_msg(),
+                    _ => error_msg(),
                 }
                 arg_names.push(name_as_string);
             }
