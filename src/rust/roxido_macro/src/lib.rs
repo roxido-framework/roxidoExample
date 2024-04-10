@@ -155,6 +155,22 @@ fn roxido_fn(options: Vec<NestedMeta>, item_fn: syn::ItemFn) -> TokenStream {
                         vec.push(parse_quote! { let #name = #name.as_vector().stop_str(concat!("'", stringify!(#name),"' is expected to be a vector")); });
                     }
                 };
+                let as_rmatrix = |vec: &mut Vec<_>, mutable: bool| {
+                    as_robject(vec, mutable);
+                    if mutable {
+                        vec.push(parse_quote! { let #name = #name.as_matrix_mut().stop_str(concat!("'", stringify!(#name),"' is expected to be a matrix")); });
+                    } else {
+                        vec.push(parse_quote! { let #name = #name.as_matrix().stop_str(concat!("'", stringify!(#name),"' is expected to be a matrix")); });
+                    }
+                };
+                let as_rarray = |vec: &mut Vec<_>, mutable: bool| {
+                    as_robject(vec, mutable);
+                    if mutable {
+                        vec.push(parse_quote! { let #name = #name.as_array_mut().stop_str(concat!("'", stringify!(#name),"' is expected to be an array")); });
+                    } else {
+                        vec.push(parse_quote! { let #name = #name.as_array().stop_str(concat!("'", stringify!(#name),"' is expected to be an array")); });
+                    }
+                };
                 let as_type = |vec: &mut Vec<_>, tipe: &str, path: &str, mutable: bool| {
                     if let Some(snippet) = path.strip_prefix(tipe) {
                         if let Some(snippet) = snippet.strip_prefix(" < ") {
@@ -200,10 +216,8 @@ fn roxido_fn(options: Vec<NestedMeta>, item_fn: syn::ItemFn) -> TokenStream {
                                     }
                                 }
                             }
-                        } else {
-                            if ! snippet.is_empty() {
-                                error_msg();
-                            }
+                        } else if ! snippet.is_empty() {
+                            error_msg();
                         }
                     }
                 };
@@ -331,11 +345,11 @@ fn roxido_fn(options: Vec<NestedMeta>, item_fn: syn::ItemFn) -> TokenStream {
                                         as_type(&mut generated_statements, "RVector", x, mutable);
                                     },
                                     x if x.starts_with("RMatrix") => {
-                                        as_rscalar(&mut generated_statements, mutable);
+                                        as_rmatrix(&mut generated_statements, mutable);
                                         as_type(&mut generated_statements, "RMatrix", x, mutable);
                                     },
                                     x if x.starts_with("RArray") => {
-                                        as_rscalar(&mut generated_statements, mutable);
+                                        as_rarray(&mut generated_statements, mutable);
                                         as_type(&mut generated_statements, "RArray", x, mutable);
                                     },
                                     x if x.starts_with("RObject") => {

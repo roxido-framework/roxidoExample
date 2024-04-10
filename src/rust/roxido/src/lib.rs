@@ -224,7 +224,7 @@ pub trait R2HasLength2: IsRObject {
     }
 }
 
-trait RHasNames: R2HasLength2 {
+pub trait RHasNames: R2HasLength2 {
     /// Get names of values in a RVector.
     fn get_names(&self) -> &R2Vector2<char> {
         unsafe { Rf_getAttrib(self.sexp(), R_NamesSymbol).transmute(self) }
@@ -4013,8 +4013,14 @@ impl R2ExternalPtr2 {
 
 // Conversions
 
-pub trait FromR<RType, RMode, U> {
+pub trait FromROld<RType, RMode, U> {
     fn from_r(x: &RObject<RType, RMode>, pc: &Pc) -> Result<Self, U>
+    where
+        Self: Sized;
+}
+
+pub trait FromR<T: IsRObject, U> {
+    fn from_r(x: &T, pc: &Pc) -> Result<Self, U>
     where
         Self: Sized;
 }
@@ -4130,6 +4136,12 @@ to_2rvector24!(f64, f64);
 to_2rvector24!(i32, i32);
 to_2rvector24!(u8, u8);
 to_2rvector24!(bool, bool);
+
+impl To2RObject2 for () {
+    fn to_2r(self, pc: &Pc) -> &impl IsRObject {
+        unsafe { R_NilValue.transmute_mut::<R2Object2, Pc>(pc) }
+    }
+}
 
 impl To2RObject2 for SEXP {
     fn to_2r(self, pc: &Pc) -> &impl IsRObject {
