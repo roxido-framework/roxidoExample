@@ -2463,20 +2463,36 @@ pub trait R2FromIterator2<T> {
         T: 'b;
 }
 
-pub trait RGetSet<T, I> {
-    /// Get the value at a certain index in an $tipe RVector.
-    fn get(&self, index: I) -> Result<T, &'static str>;
-
-    /// Set the value at a certain index in an $tipe RVector.
-    fn set(&mut self, index: I, value: T) -> Result<(), &'static str>;
-}
-
 pub trait RGetSet0<T> {
     /// Get the value at a certain index in an $tipe RVector.
     fn get(&self) -> T;
 
     /// Set the value at a certain index in an $tipe RVector.
     fn set(&mut self, value: T);
+}
+
+pub trait RGetSet1<T> {
+    /// Get the value at a certain index in an $tipe RVector.
+    fn get(&self, index: usize) -> Result<T, &'static str>;
+
+    /// Set the value at a certain index in an $tipe RVector.
+    fn set(&mut self, index: usize, value: T) -> Result<(), &'static str>;
+}
+
+pub trait RGetSet2<T> {
+    /// Get the value at a certain index in an $tipe RVector.
+    fn get(&self, row: usize, col: usize) -> Result<T, &'static str>;
+
+    /// Set the value at a certain index in an $tipe RVector.
+    fn set(&mut self, row: usize, col: usize, value: T) -> Result<(), &'static str>;
+}
+
+pub trait RGetSetN<T> {
+    /// Get the value at a certain index in an $tipe RVector.
+    fn get(&self, index: &[usize]) -> Result<T, &'static str>;
+
+    /// Set the value at a certain index in an $tipe RVector.
+    fn set(&mut self, index: &[usize], value: T) -> Result<(), &'static str>;
 }
 
 macro_rules! r2scalar_getset2 {
@@ -2560,7 +2576,7 @@ macro_rules! r2vector2 {
             }
         }
 
-        impl RGetSet<$tipe, usize> for R2Vector2<$tipe> {
+        impl RGetSet1<$tipe> for R2Vector2<$tipe> {
             /// Get the value at a certain index in an $tipe RVector.
             fn get(&self, index: usize) -> Result<$tipe, &'static str> {
                 if index < self.len() {
@@ -2645,7 +2661,7 @@ impl R2FromIterator2<bool> for R2Vector2<bool> {
     }
 }
 
-impl RGetSet<bool, usize> for R2Vector2<bool> {
+impl RGetSet1<bool> for R2Vector2<bool> {
     /// Get the value at a certain index in an $tipe RVector.
     fn get(&self, index: usize) -> Result<bool, &'static str> {
         if index < self.len() {
@@ -2799,18 +2815,18 @@ impl RVectorConstructors<&str> for R2Vector2<char> {
 
 pub trait RMatrixConstructors<T> {
     #[allow(clippy::mut_from_ref)]
-    fn new(dim: [usize; 2], pc: &Pc) -> &mut Self;
+    fn new(nrow: usize, ncol: usize, pc: &Pc) -> &mut Self;
 
     #[allow(clippy::mut_from_ref)]
-    fn from_value(value: T, dim: [usize; 2], pc: &Pc) -> &mut Self;
+    fn from_value(value: T, nrow: usize, ncol: usize, pc: &Pc) -> &mut Self;
 }
 
 macro_rules! r2matrix2 {
     ($tipe:ty, $code:expr, $get:expr, $set:expr) => {
-        impl RGetSet<$tipe, [usize; 2]> for R2Matrix2<$tipe> {
+        impl RGetSet2<$tipe> for R2Matrix2<$tipe> {
             /// Get the value at a certain index in an $tipe RMatrix.
-            fn get(&self, index: [usize; 2]) -> Result<$tipe, &'static str> {
-                let index = self.index(index, None);
+            fn get(&self, row: usize, col: usize) -> Result<$tipe, &'static str> {
+                let index = self.index(row, col, None);
                 if index < self.len() {
                     Ok(unsafe { $get(self.sexp(), index.try_into().unwrap()) })
                 } else {
@@ -2819,8 +2835,8 @@ macro_rules! r2matrix2 {
             }
 
             /// Set the value at a certain index in an $tipe RMatrix.
-            fn set(&mut self, index: [usize; 2], value: $tipe) -> Result<(), &'static str> {
-                let index = self.index(index, None);
+            fn set(&mut self, row: usize, col: usize, value: $tipe) -> Result<(), &'static str> {
+                let index = self.index(row, col, None);
                 if index < self.len() {
                     unsafe { $set(self.sexp(), index.try_into().unwrap(), value) };
                     Ok(())
@@ -2831,18 +2847,18 @@ macro_rules! r2matrix2 {
         }
 
         impl RMatrixConstructors<$tipe> for R2Matrix2<$tipe> {
-            fn new(dim: [usize; 2], pc: &Pc) -> &mut Self {
+            fn new(nrow: usize, ncol: usize, pc: &Pc) -> &mut Self {
                 unsafe {
                     pc.protect_and_transmute(Rf_allocMatrix(
                         $code,
-                        dim[0].try_into().stop_str(TOO_LONG),
-                        dim[1].try_into().stop_str(TOO_LONG),
+                        nrow.try_into().stop_str(TOO_LONG),
+                        ncol.try_into().stop_str(TOO_LONG),
                     ))
                 }
             }
 
-            fn from_value(value: $tipe, dim: [usize; 2], pc: &Pc) -> &mut Self {
-                let result = Self::new(dim, pc);
+            fn from_value(value: $tipe, nrow: usize, ncol: usize, pc: &Pc) -> &mut Self {
+                let result = Self::new(nrow, ncol, pc);
                 let slice = result.slice_mut();
                 slice.fill(value);
                 result
@@ -2889,9 +2905,9 @@ impl<T> R2Matrix2<T> {
     }
 
     /// Get the index of a value based on the row and column number.
-    pub fn index(&self, [i, j]: [usize; 2], nrow: Option<usize>) -> usize {
+    pub fn index(&self, row: usize, col: usize, nrow: Option<usize>) -> usize {
         let nrow = nrow.unwrap_or_else(|| self.nrow());
-        nrow * j + i
+        nrow * col + row
     }
 
     /// Get the dimnames of a matrix.
@@ -2944,7 +2960,7 @@ pub trait RArrayConstructors<T> {
 
 macro_rules! r2array2 {
     ($tipe:ty, $code:expr, $get:expr, $set:expr) => {
-        impl RGetSet<$tipe, &[usize]> for R2Array2<$tipe> {
+        impl RGetSetN<$tipe> for R2Array2<$tipe> {
             /// Get the value at a certain index in an $tipe RArray.
             fn get(&self, index: &[usize]) -> Result<$tipe, &'static str> {
                 let index = self.index(index, None);
