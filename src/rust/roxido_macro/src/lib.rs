@@ -40,7 +40,7 @@ pub fn roxido(attr: TokenStream, item: TokenStream) -> TokenStream {
         .unwrap();
     match syn::parse_macro_input!(item as syn::Item) {
         syn::Item::Fn(item_fn) => roxido_fn(options, item_fn),
-        _ => panic!("The 'roxido' attribute can only be added to a function."),
+        _ => panic!("The 'roxido' attribute can only be applied to a function"),
     }
 }
 
@@ -54,6 +54,10 @@ impl syn::parse::Parse for NestedMeta {
             Err(input.error("Parse error"))
         }
     }
+}
+
+macro_rules! TYPE_MESSAGE {
+    () => { "ach argument to a 'roxido' function must have one of the following types: &RArray, &RDataFrame, &RExternalPtr, &RFunction, &RList, &RMatrix, &RObject, &RScalar, &RSymbol, &RVector, SEXP, f64, i32, usize, u8, bool, &str, &[f64], &[i32], &[u8]" };
 }
 
 fn roxido_fn(options: Vec<NestedMeta>, item_fn: syn::ItemFn) -> TokenStream {
@@ -84,20 +88,20 @@ fn roxido_fn(options: Vec<NestedMeta>, item_fn: syn::ItemFn) -> TokenStream {
                         "true" => longjmp = true,
                         "false" => longjmp = false,
                         _ => {
-                            panic!("Unsupported value '{value_string}' for {name_string}.")
+                            panic!("Unsupported value '{value_string}' for {name_string}")
                         }
                     },
                     "invisible" => match value_string.as_str() {
                         "true" => invisible = true,
                         "false" => invisible = false,
                         _ => {
-                            panic!("Unsupported value '{value_string}' for {name_string}.")
+                            panic!("Unsupported value '{value_string}' for {name_string}")
                         }
                     },
-                    _ => panic!("Unsupported option '{name_string}'."),
+                    _ => panic!("Unsupported option '{name_string}'"),
                 }
             }
-            _ => panic!("Unsupported option '{meta_string}'."),
+            _ => panic!("Unsupported option '{meta_string}'"),
         }
     }
     let name = item_fn.sig.ident;
@@ -130,7 +134,11 @@ fn roxido_fn(options: Vec<NestedMeta>, item_fn: syn::ItemFn) -> TokenStream {
                 }
                 let ty = &pat_type.ty;
                 let error_msg = || {
-                    panic!("'{}' is of type '{}', but arguments to 'roxido' functions must be of type &RObject, &RObject<A,B>, SEXP, f64, i32, usize, u8, bool, or &str", name_as_string, quote!(#ty))
+                    panic!(
+                        concat!("'{}' is of type '{}', but e", TYPE_MESSAGE!()),
+                        name_as_string,
+                        quote!(#ty)
+                    )
                 };
                 let as_robject = |vec: &mut Vec<_>, mutable: bool| {
                     if mutable {
@@ -182,41 +190,41 @@ fn roxido_fn(options: Vec<NestedMeta>, item_fn: syn::ItemFn) -> TokenStream {
                                         } else {
                                             vec.push(parse_quote! { let #name = #name.as_f64().stop_str(concat!("'", stringify!(#name),"' is expected to have storage mode double")); });
                                         }
-                                    },
+                                    }
                                     "i32" => {
                                         if mutable {
                                             vec.push(parse_quote! { let #name = #name.as_i32_mut().stop_str(concat!("'", stringify!(#name),"' is expected to have storage mode integer")); });
                                         } else {
                                             vec.push(parse_quote! { let #name = #name.as_i32().stop_str(concat!("'", stringify!(#name),"' is expected to have storage mode integer")); });
                                         }
-                                    },
+                                    }
                                     "u8" => {
                                         if mutable {
                                             vec.push(parse_quote! { let #name = #name.as_u8_mut().stop_str(concat!("'", stringify!(#name),"' is expected to have storage mode raw")); });
                                         } else {
                                             vec.push(parse_quote! { let #name = #name.as_u8().stop_str(concat!("'", stringify!(#name),"' is expected to have storage mode raw")); });
                                         }
-                                    },
+                                    }
                                     "bool" => {
                                         if mutable {
                                             vec.push(parse_quote! { let #name = #name.as_bool_mut().stop_str(concat!("'", stringify!(#name),"' is expected to have storage mode logical")); });
                                         } else {
                                             vec.push(parse_quote! { let #name = #name.as_bool().stop_str(concat!("'", stringify!(#name),"' is expected to have storage mode logical")); });
                                         }
-                                    },
+                                    }
                                     "char" => {
                                         if mutable {
                                             vec.push(parse_quote! { let #name = #name.as_char_mut().stop_str(concat!("'", stringify!(#name),"' is expected to have storage mode character")); });
                                         } else {
                                             vec.push(parse_quote! { let #name = #name.as_char().stop_str(concat!("'", stringify!(#name),"' is expected to have storage mode character")); });
                                         }
-                                    },
+                                    }
                                     _ => {
-                                        panic!("'{}' has '{}' as the type parameter, but one of the following was expected: f64, i32, u8, bool, char", name_as_string, snippet);
+                                        panic!("'{}' has type parameter '{}', but one of the following was expected: f64, i32, u8, bool, char", name_as_string, snippet);
                                     }
                                 }
                             }
-                        } else if ! snippet.is_empty() {
+                        } else if !snippet.is_empty() {
                             error_msg();
                         }
                     }
@@ -229,7 +237,8 @@ fn roxido_fn(options: Vec<NestedMeta>, item_fn: syn::ItemFn) -> TokenStream {
                             "SEXP" => {}
                             "f64" => {
                                 as_rscalar(&mut generated_statements, false);
-                                generated_statements.push(parse_quote! { let #name = #name.f64(); });
+                                generated_statements
+                                    .push(parse_quote! { let #name = #name.f64(); });
                             }
                             "i32" => {
                                 as_rscalar(&mut generated_statements, false);
@@ -262,40 +271,58 @@ fn roxido_fn(options: Vec<NestedMeta>, item_fn: syn::ItemFn) -> TokenStream {
                                 let path = quote!(#ty).to_string();
                                 match path.as_ref() {
                                     "f64" => {
-                                        as_type(&mut generated_statements, "RVector", "RVector < f64 >", mutable);
+                                        as_type(
+                                            &mut generated_statements,
+                                            "RVector",
+                                            "RVector < f64 >",
+                                            mutable,
+                                        );
                                     }
                                     "i32" => {
-                                        as_type(&mut generated_statements, "RVector", "RVector < i32 >", mutable);
+                                        as_type(
+                                            &mut generated_statements,
+                                            "RVector",
+                                            "RVector < i32 >",
+                                            mutable,
+                                        );
                                     }
                                     "u8" => {
-                                        as_type(&mut generated_statements, "RVector", "RVector < u8 >", mutable);
+                                        as_type(
+                                            &mut generated_statements,
+                                            "RVector",
+                                            "RVector < u8 >",
+                                            mutable,
+                                        );
                                     }
                                     _ => {
-                                        panic!("'{}' is slice of '{}', but a 'roxido' function only supports slices of f64, i32, and u8.", name_as_string, path);
+                                        panic!("'{}' is slice of '{}', but a 'roxido' function only supports slices of f64, i32, and u8", name_as_string, path);
                                     }
                                 }
                                 if mutable {
-                                    generated_statements.push(parse_quote! { let #name = #name.slice_mut(); });
+                                    generated_statements
+                                        .push(parse_quote! { let #name = #name.slice_mut(); });
                                 } else {
-                                    generated_statements.push(parse_quote! { let #name = #name.slice(); });
+                                    generated_statements
+                                        .push(parse_quote! { let #name = #name.slice(); });
                                 }
-                            },
+                            }
                             syn::Type::Path(ty) => {
                                 if reference.lifetime.is_some() {
-                                    panic!("'{}' has a lifetime, which is not supported for a 'roxido' function.", name_as_string);
+                                    panic!("'{}' has a lifetime, which is not supported for a 'roxido' function", name_as_string);
                                 }
                                 let path = quote!(#ty).to_string();
                                 match path.as_str() {
                                     "str" => {
                                         if mutable {
-                                            panic!("'{}' is a &mut str, but only &str is supported for a 'roxido' function.", name_as_string);
+                                            panic!("'{}' is a &mut str, but only &str is supported for a 'roxido' function", name_as_string);
                                         }
                                         as_rscalar(&mut generated_statements, false);
-                                        generated_statements.push(parse_quote! { let #name = #name.str(pc); });
-                                    },
+                                        generated_statements
+                                            .push(parse_quote! { let #name = #name.str(pc); });
+                                    }
                                     "RObject" => {
                                         as_robject(&mut generated_statements, mutable);
-                                    },
+                                    }
                                     "RList" => {
                                         as_robject(&mut generated_statements, mutable);
                                         if mutable {
@@ -303,7 +330,7 @@ fn roxido_fn(options: Vec<NestedMeta>, item_fn: syn::ItemFn) -> TokenStream {
                                         } else {
                                             generated_statements.push(parse_quote! { let #name = #name.as_list().stop_str(concat!("'", stringify!(#name),"' is expected to be a list")); });
                                         }
-                                    },
+                                    }
                                     "RDataFrame" => {
                                         as_robject(&mut generated_statements, mutable);
                                         if mutable {
@@ -311,7 +338,7 @@ fn roxido_fn(options: Vec<NestedMeta>, item_fn: syn::ItemFn) -> TokenStream {
                                         } else {
                                             generated_statements.push(parse_quote! { let #name = #name.as_data_frame().stop_str(concat!("'", stringify!(#name),"' is expected to be a data frame")); });
                                         }
-                                    },
+                                    }
                                     "RFunction" => {
                                         as_robject(&mut generated_statements, mutable);
                                         if mutable {
@@ -319,7 +346,7 @@ fn roxido_fn(options: Vec<NestedMeta>, item_fn: syn::ItemFn) -> TokenStream {
                                         } else {
                                             generated_statements.push(parse_quote! { let #name = #name.as_function().stop_str(concat!("'", stringify!(#name),"' is expected to be a function")); });
                                         }
-                                    },
+                                    }
                                     "RExternalPtr" => {
                                         as_robject(&mut generated_statements, mutable);
                                         if mutable {
@@ -327,7 +354,7 @@ fn roxido_fn(options: Vec<NestedMeta>, item_fn: syn::ItemFn) -> TokenStream {
                                         } else {
                                             generated_statements.push(parse_quote! { let #name = #name.as_external_ptr().stop_str(concat!("'", stringify!(#name),"' is expected to be a external pointer")); });
                                         }
-                                    },
+                                    }
                                     "RSymbol" => {
                                         as_robject(&mut generated_statements, mutable);
                                         if mutable {
@@ -335,220 +362,26 @@ fn roxido_fn(options: Vec<NestedMeta>, item_fn: syn::ItemFn) -> TokenStream {
                                         } else {
                                             generated_statements.push(parse_quote! { let #name = #name.as_symbol().stop_str(concat!("'", stringify!(#name),"' is expected to be a symbol")); });
                                         }
-                                    },
+                                    }
                                     x if x.starts_with("RScalar") => {
                                         as_rscalar(&mut generated_statements, mutable);
                                         as_type(&mut generated_statements, "RScalar", x, mutable);
-                                    },
+                                    }
                                     x if x.starts_with("RVector") => {
                                         as_rvector(&mut generated_statements, mutable);
                                         as_type(&mut generated_statements, "RVector", x, mutable);
-                                    },
+                                    }
                                     x if x.starts_with("RMatrix") => {
                                         as_rmatrix(&mut generated_statements, mutable);
                                         as_type(&mut generated_statements, "RMatrix", x, mutable);
-                                    },
+                                    }
                                     x if x.starts_with("RArray") => {
                                         as_rarray(&mut generated_statements, mutable);
                                         as_type(&mut generated_statements, "RArray", x, mutable);
-                                    },
-                                    x if x.starts_with("RObject") => {
-                                        if mutable {
-                                            generated_statements.push(parse_quote! {
-                                                let #name = unsafe { #name.transmute_mut::<RObject, Pc>(pc) };
-                                            });
-                                        } else {
-                                            generated_statements.push(parse_quote! {
-                                                let #name = unsafe { #name.transmute::<RObject, Pc>(pc) };
-                                            });
-                                        }
-                                        if path.ends_with('>') {
-                                            let Some(snippet) = path.strip_prefix("RObject < ") else {
-                                                error_msg()
-                                            };
-                                            let Some(snippet) = snippet.strip_suffix(" >") else {
-                                                error_msg()
-                                            };
-                                            let tasks: Vec<_> = snippet.split(", ").collect();
-                                            if !(1..=2).contains(&tasks.len()) {
-                                                panic!(
-                                                    "'{}' should have at most 2 type parameters",
-                                                    name_as_string
-                                                );
-                                            }
-                                            if let Some(&rtype) = tasks.first() {
-                                                match rtype {
-                                                    "RScalar" => {
-                                                        if mutable {
-                                                            generated_statements.push(parse_quote! {
-                                                                let #name = #name.as_scalar_mut().stop_str(concat!("'", stringify!(#name),"' is expected to be a scalar"));
-                                                            });
-                                                        } else {
-                                                            generated_statements.push(parse_quote! {
-                                                                let #name = #name.as_scalar().stop_str(concat!("'", stringify!(#name),"' is expected to be a scalar"));
-                                                            });
-                                                        }
-                                                    }
-                                                    "RVector" => {
-                                                        if mutable {
-                                                            generated_statements.push(parse_quote! {
-                                                                let #name = #name.as_vector_mut().stop_str(concat!("'", stringify!(#name),"' is expected to be a vector"));
-                                                            });
-                                                        } else {
-                                                            generated_statements.push(parse_quote! {
-                                                                let #name = #name.as_vector().stop_str(concat!("'", stringify!(#name),"' is expected to be a vector"));
-                                                            });
-                                                        }
-                                                    }
-                                                    "RMatrix" => {
-                                                        if mutable {
-                                                            generated_statements.push(parse_quote! {
-                                                                let #name = #name.as_matrix_mut().stop_str(concat!("'", stringify!(#name),"' is expected to be a matrix"));
-                                                            });
-                                                        } else {
-                                                            generated_statements.push(parse_quote! {
-                                                                let #name = #name.as_matrix().stop_str(concat!("'", stringify!(#name),"' is expected to be a matrix"));
-                                                            });
-                                                        }
-                                                    }
-                                                    "RArray" => {
-                                                        if mutable {
-                                                            generated_statements.push(parse_quote! {
-                                                                let #name = #name.as_array_mut().stop_str(concat!("'", stringify!(#name),"' is expected to be an array"));
-                                                            });
-                                                        } else {
-                                                            generated_statements.push(parse_quote! {
-                                                                let #name = #name.as_array().stop_str(concat!("'", stringify!(#name),"' is expected to be an array"));
-                                                            });
-                                                        }
-                                                    }
-                                                    "RList" => {
-                                                        if mutable {
-                                                            generated_statements.push(parse_quote! {
-                                                                let #name = #name.as_list_mut().stop_str(concat!("'", stringify!(#name),"' is expected to be a list"));
-                                                            });
-                                                        } else {
-                                                            generated_statements.push(parse_quote! {
-                                                                let #name = #name.as_list().stop_str(concat!("'", stringify!(#name),"' is expected to be a list"));
-                                                            });
-                                                        }
-                                                    }
-                                                    "RFunction" => {
-                                                        if mutable {
-                                                            generated_statements.push(parse_quote! {
-                                                                let #name = #name.as_function_mut().stop_str(concat!("'", stringify!(#name),"' is expected to be a function"));
-                                                            });
-                                                        } else {
-                                                            generated_statements.push(parse_quote! {
-                                                                let #name = #name.as_function().stop_str(concat!("'", stringify!(#name),"' is expected to be a function"));
-                                                            });
-                                                        }
-                                                    }
-                                                    "RExternalPtr" => {
-                                                        if mutable {
-                                                            generated_statements.push(parse_quote! {
-                                                                let #name = #name.as_external_ptr_mut().stop_str(concat!("'", stringify!(#name),"' is expected to be an external pointer"));
-                                                            });
-                                                        } else {
-                                                            generated_statements.push(parse_quote! {
-                                                                let #name = #name.as_external_ptr().stop_str(concat!("'", stringify!(#name),"' is expected to be an external pointer"));
-                                                            });
-                                                        }
-                                                    }
-                                                    "RSymbol" => {
-                                                        if mutable {
-                                                            generated_statements.push(parse_quote! {
-                                                                let #name = #name.as_symbol_mut().stop_str(concat!("'", stringify!(#name),"' is expected to be a symbol"));
-                                                            });
-                                                        } else {
-                                                            generated_statements.push(parse_quote! {
-                                                                let #name = #name.as_symbol().stop_str(concat!("'", stringify!(#name),"' is expected to be a symbol"));
-                                                            });
-                                                        }
-                                                    }
-                                                    e => {
-                                                        panic!("'{}' has '{}' as the first type parameter, but one of the following was expected: RScalar, RVector, RMatrix, RArray, RList, RFunction, RExternalPtr, RSymbol", name_as_string, e);
-                                                    }
-                                                }
-                                            }
-                                            if let Some(&rtype) = tasks.get(1) {
-                                                match rtype {
-                                                    "f64" => {
-                                                        if mutable {
-                                                            generated_statements.push(parse_quote! {
-                                                                let #name = #name.as_f64_mut().stop_str(concat!("'", stringify!(#name),"' is expected to have storage mode double"));
-                                                            });
-                                                        } else {
-                                                            generated_statements.push(parse_quote! {
-                                                                let #name = #name.as_f64().stop_str(concat!("'", stringify!(#name),"' is expected to have storage mode double"));
-                                                            });
-                                                        }
-                                                    }
-                                                    "i32" => {
-                                                        if mutable {
-                                                            generated_statements.push(parse_quote! {
-                                                                let #name = #name.as_i32_mut().stop_str(concat!("'", stringify!(#name),"' is expected to have storage mode integer"));
-                                                            });
-                                                        } else {
-                                                            generated_statements.push(parse_quote! {
-                                                                let #name = #name.as_i32().stop_str(concat!("'", stringify!(#name),"' is expected to have storage mode integer"));
-                                                            });
-                                                        }
-                                                    }
-                                                    "u8" => {
-                                                        if mutable {
-                                                            generated_statements.push(parse_quote! {
-                                                                let #name = #name.as_u8_mut().stop_str(concat!("'", stringify!(#name),"' is expected to have storage mode raw"));
-                                                            });
-                                                        } else {
-                                                            generated_statements.push(parse_quote! {
-                                                                let #name = #name.as_u8().stop_str(concat!("'", stringify!(#name),"' is expected to have storage mode raw"));
-                                                            });
-                                                        }
-                                                    }
-                                                    "bool" => {
-                                                        if mutable {
-                                                            generated_statements.push(parse_quote! {
-                                                                let #name = #name.as_bool_mut().stop_str(concat!("'", stringify!(#name),"' is expected to have storage mode logical"));
-                                                            });
-                                                        } else {
-                                                            generated_statements.push(parse_quote! {
-                                                                let #name = #name.as_bool().stop_str(concat!("'", stringify!(#name),"' is expected to have storage mode logical"));
-                                                            });
-                                                        }
-                                                    }
-                                                    "RCharacter" => {
-                                                        if mutable {
-                                                            generated_statements.push(parse_quote! {
-                                                                let #name = #name.as_character_mut().stop_str(concat!("'", stringify!(#name),"' is expected to have storage mode character"));
-                                                            });
-                                                        } else {
-                                                            generated_statements.push(parse_quote! {
-                                                                let #name = #name.as_character().stop_str(concat!("'", stringify!(#name),"' is expected to have storage mode character"));
-                                                            });
-                                                        }
-                                                    }
-                                                    "RDataFrame" => {
-                                                        if mutable {
-                                                            generated_statements.push(parse_quote! {
-                                                                let #name = #name.as_data_frame_mut().stop_str(concat!("'", stringify!(#name),"' is expected to be a data frame"));
-                                                            });
-                                                        } else {
-                                                            generated_statements.push(parse_quote! {
-                                                                let #name = #name.as_data_frame().stop_str(concat!("'", stringify!(#name),"' is expected to be a data frame"));
-                                                            });
-                                                        }
-                                                    }
-                                                    e => {
-                                                        panic!("'{}' has '{}' as the second type parameter, but one of the following was expected: f64, i32, u8, bool, RCharacter, RDataFrame", name_as_string, e);
-                                                    }
-                                                }
-                                            }
-                                        }
-                                    },
-                                    _ => error_msg()
+                                    }
+                                    _ => error_msg(),
                                 }
-                            },
+                            }
                             _ => error_msg(),
                         }
                     }
@@ -556,7 +389,7 @@ fn roxido_fn(options: Vec<NestedMeta>, item_fn: syn::ItemFn) -> TokenStream {
                 }
                 arg_names.push(name_as_string);
             }
-            _ => panic!("Each argument to a 'roxido' function must be of type &RObject, &RObject<A,B>, SEXP, f64, i32, usize, u8, bool, or &str")
+            _ => panic!(concat!("E", TYPE_MESSAGE!())),
         }
     }
     // Check that return is of type '&RObject'.
@@ -564,7 +397,7 @@ fn roxido_fn(options: Vec<NestedMeta>, item_fn: syn::ItemFn) -> TokenStream {
         syn::ReturnType::Default => {}
         _ => {
             panic!(
-                "A 'roxido' function should not have an explicit return type and it implicitly returns any value whose type implements one of the ToR trait"
+                "A 'roxido' function should not have an explicit return type, as its body is actually a closure which returns any value whose type provides a 'to_r' method"
             );
         }
     }
@@ -572,7 +405,7 @@ fn roxido_fn(options: Vec<NestedMeta>, item_fn: syn::ItemFn) -> TokenStream {
     if let Some(mut path) = r_function_directory {
         path.push(&func_name);
         let mut file = File::create(&path)
-            .unwrap_or_else(|_| panic!("Could not open file '{:?}' for writing.", &path));
+            .unwrap_or_else(|_| panic!("Could not open file '{:?}' for writing", &path));
         let args = arg_names.join(", ");
         let comma = if args.is_empty() { "" } else { ", " };
         let (invisible_opening, invisible_closing) = match invisible {

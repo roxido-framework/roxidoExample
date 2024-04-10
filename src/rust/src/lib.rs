@@ -5,60 +5,8 @@ mod registration {
 use roxido::*;
 
 #[roxido]
-fn convolve4(a: &RVector<f64>, b: &RVector<f64>) {
-    let vec_3 = R2Vector2::from_value(5.0, a.len() + b.len() - 1, pc);
-    // let vec_3 = RVector::from_value(5.0, a.len() + b.len() - 1, pc);
-
-    let bob = ["David", "Dahl"].to_r(pc);
-    let bob = [false, true].to_r(pc);
-
-    let bill = "David".to_r(pc);
-    let bill = 1.0.to_r(pc);
-    let bill = 1_usize.to_r(pc);
-    let sue = 1.0.to_r(pc);
-
-    sue.set(4.0);
-    let s = sue.get();
-
-    // let first_names
-    // let ages = c(1,2,3);
-    // let vec_3: () = RList::from_tuples([("first",first_names),("ages",ages)], pc);
-
-    let vec_3 = R2Vector2::<f64>::new(a.len() + b.len() - 1, pc);
-    let vec_3 = R2Vector2::<char>::new(a.len() + b.len() - 1, pc);
-    vec_3.set(4, "advid");
-    let vec_4: &mut R2Vector2<f64> = R2Vector2::<f64>::new(a.len() + b.len() - 1, pc);
-    let vec = R2Vector2::from_value(0.0, a.len() + b.len() - 1, pc);
-    let vec = R2Vector2::from_value("String", a.len() + b.len() - 1, pc);
-    let vec2 = R2Vector2::from_value(0, a.len() + b.len() - 1, pc);
-    let vec2 = R2Vector2::from_value(false, a.len() + b.len() - 1, pc);
-    let vec2 = R2Vector2::from_array([false, true], pc);
-    let vec2 = R2Vector2::from_array(["David", "Lisa"], pc);
-    //let bob: () = vec2.get(0).stop();
-    let vec2 = R2Vector2::from_array([0.0, 1.0], pc);
-    let vec2 = R2Vector2::from_array([0_u8, 1], pc);
-    let vec2 = R2Vector2::from_array([0_i32, 2], pc);
-    let vec = R2Vector2::from_value(0.0, a.len() + b.len() - 1, pc);
-    let bob = vec2.get(0).stop();
-    macro_rules! rvec {
-        ($elem:expr; $n:expr) => {
-            R2Vector2::from_value($elem, $n, pc)
-        };
-    }
-    let bob = rvec![0.0; a.len() + b.len() - 1];
-    let bob2 = rvec![0; a.len() + b.len() - 1];
-    let ab = vec.slice_mut();
-    for (i, ai) in a.slice().iter().enumerate() {
-        for (j, bj) in b.slice().iter().enumerate() {
-            ab[i + j] += ai * bj;
-        }
-    }
-    vec
-}
-
-#[roxido]
 fn convolve2(a: &[f64], b: &[f64]) {
-    let vec = R2Vector2::from_value(0.0, a.len() + b.len() - 1, pc);
+    let vec = RVector::from_value(0.0, a.len() + b.len() - 1, pc);
     let ab = vec.slice_mut();
     for (i, ai) in a.iter().enumerate() {
         for (j, bj) in b.iter().enumerate() {
@@ -69,26 +17,9 @@ fn convolve2(a: &[f64], b: &[f64]) {
 }
 
 #[roxido]
-fn add(a: f64, b: f64) {
-    a + b
-}
-
-#[roxido]
-fn add2(c: &str) {
-    // let c = c.to_2r(pc);
-    // c.sexp()
-    c
-}
-
-#[roxido]
-fn add3(c: &RScalar) {
-    c.f64()
-}
-
-#[roxido]
 fn zero2(f: &RFunction, guess1: f64, guess2: f64, tol: f64) {
     if !tol.is_finite() || tol <= 0.0 {
-        stop!("'tol' must be a strictly positive value.");
+        stop!("'tol' must be a strictly positive value");
     }
     let x_rval = 0.0.to_r(pc);
     let mut g = |x: f64| {
@@ -98,10 +29,10 @@ fn zero2(f: &RFunction, guess1: f64, guess2: f64, tol: f64) {
         };
         let fx = fx
             .as_scalar()
-            .stop_str("Unexpected return value from function.")
+            .stop_str("Unexpected return value from function")
             .f64();
         if !fx.is_finite() {
-            stop!("Non-finite return value from function.");
+            stop!("Non-finite return value from function");
         }
         fx
     };
@@ -115,7 +46,7 @@ fn zero2(f: &RFunction, guess1: f64, guess2: f64, tol: f64) {
         return x1;
     }
     if f0 * f1 > 0.0 {
-        stop!("Oops, guesses1 and guesses2 have the same sign.");
+        stop!("Oops, guesses1 and guesses2 have the same sign");
     }
     loop {
         let xc = 0.5 * (x0 + x1);
