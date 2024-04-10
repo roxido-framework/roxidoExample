@@ -57,6 +57,7 @@ pub use rbindings::SEXP;
 pub trait SexpMethods {
     fn as_robject(&self) -> &R2Object2;
 
+    #[allow(clippy::mut_from_ref)]
     fn as_robject_mut(&self) -> &mut R2Object2;
 
     fn as_str<'a>(&self) -> Result<&'a str, &'static str>;
@@ -349,7 +350,8 @@ impl Pc {
         sexp
     }
 
-    #[allow(clippy::not_unsafe_ptr_arg_deref)]
+    /// # Safety
+    /// Expert use only.
     #[allow(clippy::mut_from_ref)]
     pub unsafe fn protect_and_transmute<T: IsRObject>(&self, sexp: SEXP) -> &mut T {
         let sexp = self.protect(sexp);
@@ -1003,6 +1005,7 @@ impl R2Error2 {
     ///
     /// This does *not* throw an error.  To throw an R error, simply use `stop!`.
     ///
+    #[allow(clippy::mut_from_ref)]
     pub fn new<'a>(message: &str, pc: &'a Pc) -> &'a mut Self {
         let list = R2List2::with_names(&["message", "calls"], pc);
         let _ = list.set(0, message.to_r(pc));
@@ -3026,7 +3029,7 @@ impl<T> R2Array2<T> {
         let coef = std::iter::once(&1)
             .chain(dim[..dim.len() - 1].iter())
             .scan(1, |prod, d| {
-                *prod = (*prod) * (*d);
+                *prod *= *d;
                 Some(*prod)
             });
         let mut i = 0;
@@ -3214,7 +3217,7 @@ rlistlike!(R2DataFrame2);
 impl RObject<RVector, bool> {
     /// Get the value at a certain index in a logical RVector.
     pub fn get_bool(&self, index: usize) -> Result<bool, &'static str> {
-        self.get_engine(index, LOGICAL_ELT).map(|x| R::is_true(x))
+        self.get_engine(index, LOGICAL_ELT).map(R::is_true)
     }
 
     /// Set the value at a certain index in a logical RVector.
@@ -4160,13 +4163,14 @@ impl To2RObject2 for () {
 }
 
 impl To2RObject2 for SEXP {
+    #[allow(clippy::not_unsafe_ptr_arg_deref)]
     fn to_2r(self, pc: &Pc) -> &impl IsRObject {
         unsafe { self.transmute::<R2Object2, Pc>(pc) }
     }
 }
 
 impl<T: IsRObject> To2RObject2 for &T {
-    fn to_2r<'a>(self, pc: &'a Pc) -> &'a impl IsRObject {
+    fn to_2r(self, pc: &Pc) -> &impl IsRObject {
         unsafe { self.sexp().transmute::<R2Object2, Pc>(pc) }
     }
 }
