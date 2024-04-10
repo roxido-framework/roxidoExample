@@ -1004,7 +1004,7 @@ impl R2Error2 {
     /// This does *not* throw an error.  To throw an R error, simply use `stop!`.
     ///
     pub fn new<'a>(message: &str, pc: &'a Pc) -> &'a mut Self {
-        let list = R2List2::with_names(["message", "calls"], pc);
+        let list = R2List2::with_names(&["message", "calls"], pc);
         let _ = list.set(0, message.to_r(pc));
         let _ = list.set(1, R::null());
         list.set_class(["error", "condition"].to_2r(pc));
@@ -3588,7 +3588,7 @@ impl R2List2 {
     }
 
     #[allow(clippy::mut_from_ref)]
-    pub fn with_names<'a, const N: usize>(names: [&str; N], pc: &'a Pc) -> &'a mut Self {
+    pub fn with_names<'a>(names: &[&str], pc: &'a Pc) -> &'a mut Self {
         let result = Self::new(names.len(), pc);
         unsafe {
             Rf_namesgets(result.sexp(), names.to_r(pc).sexp());
