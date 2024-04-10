@@ -19,7 +19,7 @@ fn convolve2(a: &[f64], b: &[f64]) {
 #[roxido]
 fn zero2(f: &RFunction, guess1: f64, guess2: f64, tol: f64) {
     if !tol.is_finite() || tol <= 0.0 {
-        stop!("'tol' must be a strictly positive value");
+        stop!("'tol' must be a strictly positive value.");
     }
     let x_rval = 0.0.to_r(pc);
     let mut g = |x: f64| {
@@ -29,10 +29,10 @@ fn zero2(f: &RFunction, guess1: f64, guess2: f64, tol: f64) {
         };
         let fx = fx
             .as_scalar()
-            .stop_str("Unexpected return value from function")
+            .stop_str("Unexpected return value from function.")
             .f64();
         if !fx.is_finite() {
-            stop!("Non-finite return value from function");
+            stop!("Non-finite return value from function.");
         }
         fx
     };
@@ -46,7 +46,7 @@ fn zero2(f: &RFunction, guess1: f64, guess2: f64, tol: f64) {
         return x1;
     }
     if f0 * f1 > 0.0 {
-        stop!("Oops, guesses1 and guesses2 have the same sign");
+        stop!("Oops, values of the function at 'guesses1' and 'guesses2' have the same sign.");
     }
     loop {
         let xc = 0.5 * (x0 + x1);

@@ -89,7 +89,7 @@ impl SexpMethods for SEXP {
 
     fn as_str<'a>(&self) -> Result<&'a str, &'static str> {
         let c_str = unsafe { CStr::from_ptr(R_CHAR(*self) as *const c_char) };
-        c_str.to_str().map_err(|_| "Not valid UTF8")
+        c_str.to_str().map_err(|_| "Not valid UTF8.")
     }
 
     fn from_str(x: &str, pc: &Pc) -> Self {
@@ -120,7 +120,7 @@ use std::collections::HashMap;
 use std::ffi::{c_char, c_void, CStr};
 use std::marker::PhantomData;
 
-static TOO_LONG: &str = "Could not fit usize into i32";
+static TOO_LONG: &str = "Could not fit usize into i32.";
 
 pub struct R;
 
@@ -228,7 +228,7 @@ pub trait RHasNames: RHasLength {
     /// Set names of values in a RVector.
     fn set_names(&mut self, names: &RVector<char>) -> Result<(), &'static str> {
         if unsafe { Rf_length(names.sexp()) != Rf_length(self.sexp()) } {
-            return Err("Length of names is not correct");
+            return Err("Length of names is not correct.");
         }
         unsafe {
             Rf_namesgets(self.sexp(), names.sexp());
@@ -249,15 +249,15 @@ macro_rules! baseline_with_type {
     };
 }
 
-baseline_with_type!(Rcalar);
+baseline_with_type!(RScalar);
 baseline_with_type!(RVector);
 baseline_with_type!(RMatrix);
 baseline_with_type!(RArray);
 
 impl RHasLength for RList {}
 impl RHasLength for RDataFrame {}
-impl RHasNames for Rcalar {}
-impl RHasNames for RVector {}
+impl<T> RHasNames for RScalar<T> {}
+impl<T> RHasNames for RVector<T> {}
 impl RHasNames for RList {}
 impl RHasNames for RDataFrame {}
 
@@ -430,21 +430,21 @@ impl RObject {
         }
     }
 
-    pub fn as_scalar(&self) -> Result<&Rcalar, &'static str> {
+    pub fn as_scalar(&self) -> Result<&RScalar, &'static str> {
         let s = self.as_vector()?;
         if s.is_scalar() {
             Ok(unsafe { self.transmute() })
         } else {
-            Err("Not a vector")
+            Err("Not a vector.")
         }
     }
 
-    pub fn as_scalar_mut(&mut self) -> Result<&mut Rcalar, &'static str> {
+    pub fn as_scalar_mut(&mut self) -> Result<&mut RScalar, &'static str> {
         let s = self.as_vector()?;
         if s.is_scalar() {
             Ok(unsafe { self.transmute_mut() })
         } else {
-            Err("Not a scalar")
+            Err("Not a scalar.")
         }
     }
 
@@ -452,7 +452,7 @@ impl RObject {
         if self.is_vector() {
             Ok(unsafe { self.transmute() })
         } else {
-            Err("Not a vector")
+            Err("Not a vector.")
         }
     }
 
@@ -460,7 +460,7 @@ impl RObject {
         if self.is_vector() {
             Ok(unsafe { self.transmute_mut() })
         } else {
-            Err("Not a vector")
+            Err("Not a vector.")
         }
     }
 
@@ -470,7 +470,7 @@ impl RObject {
         if self.is_matrix() {
             Ok(unsafe { self.transmute() })
         } else {
-            Err("Not a matrix")
+            Err("Not a matrix.")
         }
     }
 
@@ -480,7 +480,7 @@ impl RObject {
         if self.is_matrix() {
             Ok(unsafe { self.transmute_mut() })
         } else {
-            Err("Not a matrix")
+            Err("Not a matrix.")
         }
     }
 
@@ -490,7 +490,7 @@ impl RObject {
         if self.is_array() {
             Ok(unsafe { self.transmute() })
         } else {
-            Err("Not a vector")
+            Err("Not a vector.")
         }
     }
 
@@ -500,7 +500,7 @@ impl RObject {
         if self.is_array() {
             Ok(unsafe { self.transmute_mut() })
         } else {
-            Err("Not a vector")
+            Err("Not a vector.")
         }
     }
 
@@ -510,7 +510,7 @@ impl RObject {
         if self.is_list() {
             Ok(unsafe { self.transmute() })
         } else {
-            Err("Not a list")
+            Err("Not a list.")
         }
     }
 
@@ -520,7 +520,7 @@ impl RObject {
         if self.is_list() {
             Ok(unsafe { self.transmute_mut() })
         } else {
-            Err("Not a list")
+            Err("Not a list.")
         }
     }
 
@@ -530,7 +530,7 @@ impl RObject {
         if self.is_data_frame() {
             Ok(unsafe { self.transmute() })
         } else {
-            Err("Not a data frame")
+            Err("Not a data frame.")
         }
     }
 
@@ -540,7 +540,7 @@ impl RObject {
         if self.is_data_frame() {
             Ok(unsafe { self.transmute_mut() })
         } else {
-            Err("Not a data frame")
+            Err("Not a data frame.")
         }
     }
 
@@ -550,7 +550,7 @@ impl RObject {
         if self.is_function() {
             Ok(unsafe { self.transmute() })
         } else {
-            Err("Not a function")
+            Err("Not a function.")
         }
     }
 
@@ -560,7 +560,7 @@ impl RObject {
         if self.is_function() {
             Ok(unsafe { self.transmute_mut() })
         } else {
-            Err("Not a function")
+            Err("Not a function.")
         }
     }
 
@@ -570,7 +570,7 @@ impl RObject {
         if self.is_external_ptr() {
             Ok(unsafe { self.transmute() })
         } else {
-            Err("Not an external pointer")
+            Err("Not an external pointer.")
         }
     }
 
@@ -580,7 +580,7 @@ impl RObject {
         if self.is_external_ptr() {
             Ok(unsafe { self.transmute_mut() })
         } else {
-            Err("Not an external pointer")
+            Err("Not an external pointer.")
         }
     }
 
@@ -590,7 +590,7 @@ impl RObject {
         if self.is_symbol() {
             Ok(unsafe { self.transmute() })
         } else {
-            Err("Not an external pointer")
+            Err("Not an external pointer.")
         }
     }
 
@@ -600,7 +600,7 @@ impl RObject {
         if self.is_symbol() {
             Ok(unsafe { self.transmute_mut() })
         } else {
-            Err("Not an external pointer")
+            Err("Not an external pointer.")
         }
     }
 
@@ -783,7 +783,7 @@ impl RFunction {
     }
 }
 
-impl Rcalar {
+impl RScalar {
     /// Check if appropriate to characterize as an f64.
     pub fn f64(&self) -> f64 {
         unsafe { Rf_asReal(self.sexp()) }
@@ -794,20 +794,20 @@ impl Rcalar {
         if self.is_i32() {
             let x = unsafe { Rf_asInteger(self.sexp()) };
             if x == i32::MIN {
-                Err("i32 equals R's NA for integers")
+                Err("i32 equals R's NA for integers.")
             } else {
                 Ok(x)
             }
         } else if self.is_f64() {
             let y = unsafe { Rf_asReal(self.sexp()) };
             if y > f64::from(i32::MAX) {
-                Err("Greater than maximum integer value")
+                Err("Greater than maximum integer value.")
             } else if y < f64::from(i32::MIN) {
-                Err("Less than minimum integer value")
+                Err("Less than minimum integer value.")
             } else if y == f64::from(i32::MIN) {
-                Err("Equals R's NA for integers")
+                Err("Equals R's NA for integers.")
             } else if y.is_nan() {
-                Err("Equals R's NaN")
+                Err("Equals R's NaN.")
             } else {
                 Ok(y.round() as i32)
             }
@@ -816,12 +816,12 @@ impl Rcalar {
         } else if self.is_bool() {
             let y = unsafe { Rf_asLogical(self.sexp()) };
             if y == i32::MIN {
-                Err("Equals R's NA for logical")
+                Err("Equals R's NA for logical.")
             } else {
                 Ok(y)
             }
         } else {
-            Err("Unsupported R type")
+            Err("Unsupported R type.")
         }
     }
 
@@ -830,36 +830,36 @@ impl Rcalar {
         if self.is_i32() {
             let x = unsafe { Rf_asInteger(self.sexp()) };
             if x == i32::MIN {
-                Err("Equals R's NA for integers")
+                Err("Equals R's NA for integers.")
             } else if x < 0 {
-                Err("Negative value not expected")
+                Err("Negative value not expected.")
             } else {
-                usize::try_from(x).map_err(|_| "Cannot convert to usize")
+                usize::try_from(x).map_err(|_| "Cannot convert to usize.")
             }
         } else if self.is_f64() {
             let y = unsafe { Rf_asReal(self.sexp()) };
             if y < 0.0 {
-                Err("Negative value not expected")
+                Err("Negative value not expected.")
             } else {
                 let z = y as usize;
                 if z as f64 == y {
                     Ok(z)
                 } else {
-                    Err("Cannot convert to usize")
+                    Err("Cannot convert to usize.")
                 }
             }
         } else if self.is_u8() {
             let x = unsafe { Rf_asInteger(self.sexp()) };
-            usize::try_from(x).map_err(|_| "Cannot convert to usize")
+            usize::try_from(x).map_err(|_| "Cannot convert to usize.")
         } else if self.is_bool() {
             let x = unsafe { Rf_asLogical(self.sexp()) };
             if x == i32::MIN {
-                Err("Equals R's NA for logical")
+                Err("Equals R's NA for logical.")
             } else {
-                usize::try_from(x).map_err(|_| "Cannot convert to usize")
+                usize::try_from(x).map_err(|_| "Cannot convert to usize.")
             }
         } else {
-            Err("Unsupported R type")
+            Err("Unsupported R type.")
         }
     }
 
@@ -867,31 +867,31 @@ impl Rcalar {
     pub fn u8(&self) -> Result<u8, &'static str> {
         if self.is_i32() {
             let x = unsafe { Rf_asInteger(self.sexp()) };
-            u8::try_from(x).map_err(|_| "Cannot convert to u8")
+            u8::try_from(x).map_err(|_| "Cannot convert to u8.")
         } else if self.is_f64() {
             let y = unsafe { Rf_asReal(self.sexp()) };
             if y < 0.0 {
-                Err("Negative value not expected")
+                Err("Negative value not expected.")
             } else {
                 let z = y as u8;
                 if z as f64 == y {
                     Ok(z)
                 } else {
-                    Err("Cannot convert to u8")
+                    Err("Cannot convert to u8.")
                 }
             }
         } else if self.is_u8() {
             let x = unsafe { Rf_asInteger(self.sexp()) };
-            u8::try_from(x).map_err(|_| "Cannot convert to u8")
+            u8::try_from(x).map_err(|_| "Cannot convert to u8.")
         } else if self.is_bool() {
             let x = unsafe { Rf_asLogical(self.sexp()) };
             if x == i32::MIN {
-                Err("Equals R's NA for logical")
+                Err("Equals R's NA for logical.")
             } else {
-                u8::try_from(x).map_err(|_| "Cannot convert to u8")
+                u8::try_from(x).map_err(|_| "Cannot convert to u8.")
             }
         } else {
-            Err("Unsupported R type")
+            Err("Unsupported R type.")
         }
     }
 
@@ -900,16 +900,16 @@ impl Rcalar {
         if self.is_i32() {
             let x = unsafe { Rf_asInteger(self.sexp()) };
             if x == i32::MIN {
-                Err("Equals R's NA for integers")
+                Err("Equals R's NA for integers.")
             } else {
                 Ok(R::is_true(x))
             }
         } else if self.is_f64() {
             let y = unsafe { Rf_asReal(self.sexp()) };
             if R::is_na_f64(y) {
-                Err("Equals R's NA for doubles")
+                Err("Equals R's NA for doubles.")
             } else if R::is_nan(y) {
-                Err("Equals R's NaN")
+                Err("Equals R's NaN.")
             } else {
                 Ok(y != 0.0)
             }
@@ -918,12 +918,12 @@ impl Rcalar {
         } else if self.is_bool() {
             let y = unsafe { Rf_asLogical(self.sexp()) };
             if y == i32::MIN {
-                Err("Equals R's NA for logical")
+                Err("Equals R's NA for logical.")
             } else {
                 Ok(R::is_true(y))
             }
         } else {
-            Err("Unsupported R type")
+            Err("Unsupported R type.")
         }
     }
 
@@ -989,7 +989,7 @@ pub trait RScalarConstructor<T> {
 
 macro_rules! r2scalar2 {
     ($tipe:ty, $code:expr) => {
-        impl RScalarConstructor<$tipe> for Rcalar<$tipe> {
+        impl RScalarConstructor<$tipe> for RScalar<$tipe> {
             #[allow(clippy::mut_from_ref)]
             fn from_value(value: $tipe, pc: &Pc) -> &mut Self {
                 unsafe { pc.protect_and_transmute($code(value)) }
@@ -1002,14 +1002,14 @@ r2scalar2!(f64, Rf_ScalarReal);
 r2scalar2!(i32, Rf_ScalarInteger);
 r2scalar2!(u8, Rf_ScalarRaw);
 
-impl RScalarConstructor<bool> for Rcalar<bool> {
+impl RScalarConstructor<bool> for RScalar<bool> {
     #[allow(clippy::mut_from_ref)]
     fn from_value(value: bool, pc: &Pc) -> &mut Self {
         unsafe { pc.protect_and_transmute(Rf_ScalarLogical(R::as_logical(value))) }
     }
 }
 
-impl RScalarConstructor<&str> for Rcalar<char> {
+impl RScalarConstructor<&str> for RScalar<char> {
     #[allow(clippy::mut_from_ref)]
     fn from_value<'a>(value: &str, pc: &'a Pc) -> &'a mut Self {
         unsafe {
@@ -1030,7 +1030,7 @@ macro_rules! rconvertable {
                 if self.is_f64() {
                     Ok(unsafe { self.transmute() })
                 } else {
-                    Err("Not of storage mode 'double'")
+                    Err("Not of storage mode 'double'.")
                 }
             }
 
@@ -1039,7 +1039,7 @@ macro_rules! rconvertable {
                 if self.is_f64() {
                     Ok(unsafe { self.transmute_mut() })
                 } else {
-                    Err("Not of storage mode 'double'")
+                    Err("Not of storage mode 'double'.")
                 }
             }
 
@@ -1071,7 +1071,7 @@ macro_rules! rconvertable {
                 if self.is_i32() {
                     Ok(unsafe { self.transmute() })
                 } else {
-                    Err("Not of storage mode 'integer'")
+                    Err("Not of storage mode 'integer'.")
                 }
             }
 
@@ -1080,7 +1080,7 @@ macro_rules! rconvertable {
                 if self.is_i32() {
                     Ok(unsafe { self.transmute_mut() })
                 } else {
-                    Err("Not of storage mode 'integer'")
+                    Err("Not of storage mode 'integer'.")
                 }
             }
 
@@ -1112,7 +1112,7 @@ macro_rules! rconvertable {
                 if self.is_u8() {
                     Ok(unsafe { self.transmute() })
                 } else {
-                    Err("Not of storage mode 'raw'")
+                    Err("Not of storage mode 'raw'.")
                 }
             }
 
@@ -1121,7 +1121,7 @@ macro_rules! rconvertable {
                 if self.is_u8() {
                     Ok(unsafe { self.transmute_mut() })
                 } else {
-                    Err("Not of storage mode 'raw'")
+                    Err("Not of storage mode 'raw'.")
                 }
             }
 
@@ -1153,7 +1153,7 @@ macro_rules! rconvertable {
                 if self.is_bool() {
                     Ok(unsafe { self.transmute() })
                 } else {
-                    Err("Not of storage mode 'logical'")
+                    Err("Not of storage mode 'logical'.")
                 }
             }
 
@@ -1162,7 +1162,7 @@ macro_rules! rconvertable {
                 if self.is_bool() {
                     Ok(unsafe { self.transmute_mut() })
                 } else {
-                    Err("Not of storage mode 'logical'")
+                    Err("Not of storage mode 'logical'.")
                 }
             }
 
@@ -1194,7 +1194,7 @@ macro_rules! rconvertable {
                 if self.is_char() {
                     Ok(unsafe { self.transmute() })
                 } else {
-                    Err("Not of storage mode 'character'")
+                    Err("Not of storage mode 'character'.")
                 }
             }
 
@@ -1203,7 +1203,7 @@ macro_rules! rconvertable {
                 if self.is_char() {
                     Ok(unsafe { self.transmute_mut() })
                 } else {
-                    Err("Not of storage mode 'character'")
+                    Err("Not of storage mode 'character'.")
                 }
             }
 
@@ -1233,7 +1233,7 @@ macro_rules! rconvertable {
     };
 }
 
-rconvertable!(Rcalar);
+rconvertable!(RScalar);
 rconvertable!(RVector);
 rconvertable!(RMatrix);
 rconvertable!(RArray);
@@ -1258,10 +1258,10 @@ macro_rules! rsliceable {
     };
 }
 
-rsliceable!(Rcalar, f64, f64, REAL);
-rsliceable!(Rcalar, i32, i32, INTEGER);
-rsliceable!(Rcalar, u8, u8, RAW);
-rsliceable!(Rcalar, bool, i32, LOGICAL);
+rsliceable!(RScalar, f64, f64, REAL);
+rsliceable!(RScalar, i32, i32, INTEGER);
+rsliceable!(RScalar, u8, u8, RAW);
+rsliceable!(RScalar, bool, i32, LOGICAL);
 rsliceable!(RVector, f64, f64, REAL);
 rsliceable!(RVector, i32, i32, INTEGER);
 rsliceable!(RVector, u8, u8, RAW);
@@ -1322,7 +1322,7 @@ pub trait RGetSetN<T> {
 
 macro_rules! r2scalar_getset2 {
     ($tipe:ty, $tipe2:ty, $get:expr, $set:expr) => {
-        impl RGetSet0<$tipe2> for Rcalar<$tipe> {
+        impl RGetSet0<$tipe2> for RScalar<$tipe> {
             fn get(&self) -> $tipe2 {
                 unsafe { $get(self.sexp(), 0) }
             }
@@ -1338,7 +1338,7 @@ r2scalar_getset2!(f64, f64, REAL_ELT, SET_REAL_ELT);
 r2scalar_getset2!(i32, i32, INTEGER_ELT, SET_INTEGER_ELT);
 r2scalar_getset2!(u8, u8, RAW_ELT, SET_RAW_ELT);
 
-impl RGetSet0<bool> for Rcalar<bool> {
+impl RGetSet0<bool> for RScalar<bool> {
     fn get(&self) -> bool {
         R::is_true(unsafe { LOGICAL_ELT(self.sexp(), 0) })
     }
@@ -1348,7 +1348,7 @@ impl RGetSet0<bool> for Rcalar<bool> {
     }
 }
 
-impl Rcalar<char> {
+impl RScalar<char> {
     pub fn get(&self) -> Result<&str, &'static str> {
         let sexp = unsafe { STRING_ELT(self.sexp(), 0) };
         sexp.as_str()
@@ -1407,7 +1407,7 @@ macro_rules! r2vector2 {
                 if index < self.len() {
                     Ok(unsafe { $get(self.sexp(), index.try_into().unwrap()) })
                 } else {
-                    Err("Index out of bounds")
+                    Err("Index out of bounds.")
                 }
             }
 
@@ -1417,7 +1417,7 @@ macro_rules! r2vector2 {
                     unsafe { $set(self.sexp(), index.try_into().unwrap(), value) };
                     Ok(())
                 } else {
-                    Err("Index out of bounds")
+                    Err("Index out of bounds.")
                 }
             }
         }
@@ -1493,7 +1493,7 @@ impl RGetSet1<bool> for RVector<bool> {
             let value = unsafe { LOGICAL_ELT(self.sexp(), index.try_into().unwrap()) };
             Ok(R::is_true(value))
         } else {
-            Err("Index out of bounds")
+            Err("Index out of bounds.")
         }
     }
 
@@ -1505,7 +1505,7 @@ impl RGetSet1<bool> for RVector<bool> {
             };
             Ok(())
         } else {
-            Err("Index out of bounds")
+            Err("Index out of bounds.")
         }
     }
 }
@@ -1516,7 +1516,7 @@ impl RVector<bool> {
         if index < self.len() {
             Ok(unsafe { LOGICAL_ELT(self.sexp(), index.try_into().unwrap()) })
         } else {
-            Err("Index out of bounds")
+            Err("Index out of bounds.")
         }
     }
 
@@ -1526,7 +1526,7 @@ impl RVector<bool> {
             unsafe { SET_LOGICAL_ELT(self.sexp(), index.try_into().unwrap(), value) };
             Ok(())
         } else {
-            Err("Index out of bounds")
+            Err("Index out of bounds.")
         }
     }
 }
@@ -1559,7 +1559,7 @@ impl RVector<char> {
         if index < self.len() {
             self.get_unchecked(index)
         } else {
-            Err("Index out of bounds")
+            Err("Index out of bounds.")
         }
     }
 
@@ -1568,14 +1568,14 @@ impl RVector<char> {
             self.set_unchecked(index, value);
             Ok(())
         } else {
-            Err("Index out of bounds")
+            Err("Index out of bounds.")
         }
     }
 
     fn get_unchecked(&self, index: usize) -> Result<&str, &'static str> {
         let sexp = unsafe { STRING_ELT(self.sexp(), index.try_into().unwrap()) };
         let c_str = unsafe { CStr::from_ptr(R_CHAR(sexp) as *const c_char) };
-        c_str.to_str().map_err(|_| "Not valid UTF8")
+        c_str.to_str().map_err(|_| "Not valid UTF8.")
     }
 
     fn set_unchecked(&mut self, index: usize, value: &str) {
@@ -1655,7 +1655,7 @@ macro_rules! r2matrix2 {
                 if index < self.len() {
                     Ok(unsafe { $get(self.sexp(), index.try_into().unwrap()) })
                 } else {
-                    Err("Index out of bounds")
+                    Err("Index out of bounds.")
                 }
             }
 
@@ -1666,7 +1666,7 @@ macro_rules! r2matrix2 {
                     unsafe { $set(self.sexp(), index.try_into().unwrap(), value) };
                     Ok(())
                 } else {
-                    Err("Index out of bounds")
+                    Err("Index out of bounds.")
                 }
             }
         }
@@ -1746,27 +1746,27 @@ impl<T> RMatrix<T> {
             Ok(rownames) => match rownames.as_vector() {
                 Ok(rownames) => {
                     if rownames.len() != self.nrow() {
-                        return Err("Row names do not match the number of rows");
+                        return Err("Row names do not match the number of rows.");
                     }
                 }
                 Err(_) => {
-                    return Err("Row names must be a character vector");
+                    return Err("Row names must be a character vector.");
                 }
             },
-            Err(_) => return Err("No row names element found"),
+            Err(_) => return Err("No row names element found."),
         };
         match dimnames.get(1) {
             Ok(colnames) => match colnames.as_vector() {
                 Ok(colnames) => {
                     if colnames.len() != self.ncol() {
-                        return Err("Column names do not match the number of columns");
+                        return Err("Column names do not match the number of columns.");
                     }
                 }
                 Err(_) => {
-                    return Err("Column names must be a character vector");
+                    return Err("Column names must be a character vector.");
                 }
             },
-            Err(_) => return Err("No column names element found"),
+            Err(_) => return Err("No column names element found."),
         };
         unsafe {
             Rf_dimnamesgets(self.sexp(), dimnames.sexp());
@@ -1792,7 +1792,7 @@ macro_rules! r2array2 {
                 if index < self.len() {
                     Ok(unsafe { $get(self.sexp(), index.try_into().unwrap()) })
                 } else {
-                    Err("Index out of bounds")
+                    Err("Index out of bounds.")
                 }
             }
             /// Set the value at a certain index in an $tipe RArray.
@@ -1802,7 +1802,7 @@ macro_rules! r2array2 {
                     unsafe { $set(self.sexp(), index.try_into().unwrap(), value) };
                     Ok(())
                 } else {
-                    Err("Index out of bounds")
+                    Err("Index out of bounds.")
                 }
             }
         }
@@ -1871,7 +1871,7 @@ impl<T> RArray<T> {
         let dim = self.dim();
         if dimnames.len() != dim.len() {
             return Err(format!(
-                "Length of dimnames is {} whereas the dim is of length {}",
+                "Length of dimnames is {} whereas the dim is of length {}.",
                 dimnames.len(),
                 dim.len()
             ));
@@ -1880,12 +1880,12 @@ impl<T> RArray<T> {
             match dimnames.get(i).unwrap().as_vector() {
                 Ok(names) => {
                     if names.len() != len {
-                        return Err(format!("Element {} of the dimnames list has length {}, but the corresponding dimension is {}", i, names.len(), len));
+                        return Err(format!("Element {} of the dimnames list has length {}, but the corresponding dimension is {}.", i, names.len(), len));
                     }
                 }
                 Err(_) => {
                     return Err(format!(
-                        "Element {} of the dimnames list must be a character vector",
+                        "Element {} of the dimnames list must be a character vector.",
                         i
                     ));
                 }
@@ -1909,7 +1909,7 @@ impl R2ListMap2<'_> {
     /// Find an RObject in the list based on its name.
     pub fn get(&mut self, name: &str) -> Result<&RObject, String> {
         let Some(index) = self.map.get(name) else {
-            return Err(format!("'{}' not found", name));
+            return Err(format!("'{}' not found.", name));
         };
         if !self.used[*index] {
             self.unused_counter -= 1;
@@ -1922,7 +1922,7 @@ impl R2ListMap2<'_> {
     pub fn exhaustive(&self) -> Result<(), String> {
         if self.unused_counter != 0 {
             return Err(format!(
-                "Unrecognized elements in list:\n    {}",
+                "Unrecognized elements in list:\n    {}.",
                 self.unused_elements().join("\n    ")
             ));
         }
@@ -1956,7 +1956,7 @@ macro_rules! rlistlike {
                         VECTOR_ELT(self.sexp(), index.try_into().unwrap()).transmute(self)
                     })
                 } else {
-                    Err("Index out of bounds")
+                    Err("Index out of bounds.")
                 }
             }
 
@@ -1966,7 +1966,7 @@ macro_rules! rlistlike {
                         VECTOR_ELT(self.sexp(), index.try_into().unwrap()).transmute_mut(self)
                     })
                 } else {
-                    Err("Index out of bounds")
+                    Err("Index out of bounds.")
                 }
             }
 
@@ -1980,7 +1980,7 @@ macro_rules! rlistlike {
                     unsafe { SET_VECTOR_ELT(self.sexp(), index.try_into().unwrap(), value.sexp()) };
                     Ok(())
                 } else {
-                    Err("Index out of bounds")
+                    Err("Index out of bounds.")
                 }
             }
 
@@ -1992,7 +1992,7 @@ macro_rules! rlistlike {
                         return Ok(self.get(i)?);
                     }
                 }
-                Err(format!("Could not find '{}' in the list", key.as_ref()))
+                Err(format!("Could not find '{}' in the list.", key.as_ref()))
             }
 
             /// Get a value from the RList based on its key.
@@ -2003,7 +2003,7 @@ macro_rules! rlistlike {
                         return Ok(self.get_mut(i)?);
                     }
                 }
-                Err(format!("Could not find '{}' in the list", key.as_ref()))
+                Err(format!("Could not find '{}' in the list.", key.as_ref()))
             }
 
             /// Convert the list into an [RListMap]
@@ -2107,12 +2107,12 @@ impl RExternalPtr {
     ///
     pub fn decode_val<T>(&self) -> Result<T, &'static str> {
         if self.is_managed_by_r() {
-            return Err("External pointer is managed by R");
+            return Err("External pointer is managed by R.");
         }
         unsafe {
             let addr = R_ExternalPtrAddr(self.sexp());
             if addr.as_ref().is_none() {
-                return Err("External pointer was already decoded by value");
+                return Err("External pointer was already decoded by value.");
             }
             R_ClearExternalPtr(self.sexp());
             Ok(*Box::from_raw(addr as *mut T))
@@ -2178,7 +2178,7 @@ impl RExternalPtr {
     ///
     pub fn register_finalizer(&self, func: extern "C" fn(sexp: SEXP)) -> Result<(), &'static str> {
         if self.is_managed_by_r() {
-            return Err("External pointer is managed by R");
+            return Err("External pointer is managed by R.");
         }
         unsafe {
             R_RegisterCFinalizerEx(self.sexp(), Some(func), 0);
@@ -2205,14 +2205,14 @@ pub trait FromR<T: IsRObject, U> {
 /// Trait for converting objects to RObjects.
 pub trait ToRScalar<RMode> {
     #[allow(clippy::mut_from_ref)]
-    fn to_r(self, pc: &Pc) -> &mut Rcalar<RMode>;
+    fn to_r(self, pc: &Pc) -> &mut RScalar<RMode>;
 }
 
 macro_rules! to_rscalar {
     ($tipe:ty, $tipe2:ty) => {
         impl<'a> ToRScalar<$tipe> for $tipe2 {
-            fn to_r(self, pc: &Pc) -> &mut Rcalar<$tipe> {
-                Rcalar::from_value(self, pc)
+            fn to_r(self, pc: &Pc) -> &mut RScalar<$tipe> {
+                RScalar::from_value(self, pc)
             }
         }
     };
@@ -2225,8 +2225,8 @@ to_rscalar!(bool, bool);
 to_rscalar!(char, &str);
 
 impl ToRScalar<i32> for usize {
-    fn to_r(self, pc: &Pc) -> &mut Rcalar<i32> {
-        Rcalar::from_value(self.try_into().stop_str(TOO_LONG), pc)
+    fn to_r(self, pc: &Pc) -> &mut RScalar<i32> {
+        RScalar::from_value(self.try_into().stop_str(TOO_LONG), pc)
     }
 }
 
@@ -2234,6 +2234,18 @@ impl ToRScalar<i32> for usize {
 pub trait ToRObject2 {
     #[allow(clippy::mut_from_ref)]
     fn to_r(self, pc: &Pc) -> &impl IsRObject;
+}
+
+/// Trait for converting objects to RObjects.
+pub trait ToRObject2Mut {
+    #[allow(clippy::mut_from_ref)]
+    fn to_r(self, pc: &Pc) -> &mut impl IsRObject;
+}
+
+/// Trait for converting objects to RObjects.
+pub trait ToRObject2Mut2 {
+    #[allow(clippy::mut_from_ref)]
+    fn to_r<'a>(&self, pc: &'a Pc) -> &'a mut impl IsRObject;
 }
 
 /// Trait for converting objects to RObjects.
@@ -2419,7 +2431,7 @@ macro_rules! stop {
     () => {
         match std::env::var("RUST_BACKTRACE") {
             Ok(_) => {
-                panic!("Panic in stop!() due to RUST_BACKTRACE environment variable")
+                panic!("Panic in stop!() due to RUST_BACKTRACE environment variable.")
             },
             Err(_) => {
                 std::panic::panic_any(RStopHelper(String::new()))
@@ -2430,7 +2442,7 @@ macro_rules! stop {
         match std::env::var("RUST_BACKTRACE") {
             Ok(_) => {
                 let mut msg = String::new();
-                msg.push_str("Panic in stop!(...) due to RUST_BACKTRACE environment variable... ");
+                msg.push_str("Panic in stop!(...) due to RUST_BACKTRACE environment variable: ");
                 msg.push_str(&format!($fmt_string));
                 panic!("{}", msg);
             },
@@ -2443,7 +2455,7 @@ macro_rules! stop {
         match std::env::var("RUST_BACKTRACE") {
             Ok(_) => {
                 let mut msg = String::new();
-                msg.push_str("Panic in stop!(...) due to RUST_BACKTRACE environment variable... ");
+                msg.push_str("Panic in stop!(...) due to RUST_BACKTRACE environment variable: ");
                 msg.push_str(&format!($fmt_string, $($arg),*));
                 panic!("{}", msg);
             },
