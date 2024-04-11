@@ -510,7 +510,7 @@ fn roxido_fn(options: Vec<NestedMeta>, item_fn: syn::ItemFn) -> TokenStream {
                     Ok(obj) => obj,
                     Err(_) => {
                         let pc = &mut Pc::__private_new();
-                        RObject::<RError>::new(concat!("Panic in Rust function '",stringify!(#name),"' with 'roxido' attribute."), pc).sexp()
+                        RError::new(concat!("Panic in Rust function '",stringify!(#name),"' with 'roxido' attribute."), pc).sexp()
                     }
                 }
             }
