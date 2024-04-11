@@ -2177,7 +2177,6 @@ pub trait FromR<T: RObjectVariant, U> {
         Self: Sized;
 }
 
-/// Trait for converting objects to RObjects.
 pub trait ToR1<T: RObjectVariant> {
     #[allow(clippy::mut_from_ref)]
     fn to_r(self, pc: &Pc) -> &mut T;
@@ -2196,6 +2195,25 @@ pub trait ToR3<T: RObjectVariant> {
 pub trait ToR4<T: RObjectVariant> {
     #[allow(clippy::mut_from_ref)]
     fn to_r<'a>(&self, pc: &'a Pc) -> &'a mut T;
+}
+
+impl ToR3<RObject> for () {
+    fn to_r(self, pc: &Pc) -> &RObject {
+        unsafe { R_NilValue.transmute_mut::<RObject, Pc>(pc) }
+    }
+}
+
+impl ToR3<RObject> for SEXP {
+    #[allow(clippy::not_unsafe_ptr_arg_deref)]
+    fn to_r(self, pc: &Pc) -> &RObject {
+        unsafe { self.transmute::<RObject, Pc>(pc) }
+    }
+}
+
+impl<T: RObjectVariant> ToR3<RObject> for &T {
+    fn to_r(self, pc: &Pc) -> &RObject {
+        unsafe { self.sexp().transmute::<RObject, Pc>(pc) }
+    }
 }
 
 macro_rules! to_rscalar {
@@ -2264,25 +2282,6 @@ to_rvector_iter!(f64, f64);
 to_rvector_iter!(i32, i32);
 to_rvector_iter!(u8, u8);
 to_rvector_iter!(bool, bool);
-
-impl ToR3<RObject> for () {
-    fn to_r(self, pc: &Pc) -> &RObject {
-        unsafe { R_NilValue.transmute_mut::<RObject, Pc>(pc) }
-    }
-}
-
-impl ToR3<RObject> for SEXP {
-    #[allow(clippy::not_unsafe_ptr_arg_deref)]
-    fn to_r(self, pc: &Pc) -> &RObject {
-        unsafe { self.transmute::<RObject, Pc>(pc) }
-    }
-}
-
-impl<T: RObjectVariant> ToR3<RObject> for &T {
-    fn to_r(self, pc: &Pc) -> &RObject {
-        unsafe { self.sexp().transmute::<RObject, Pc>(pc) }
-    }
-}
 
 /// Print to the R console.
 ///
