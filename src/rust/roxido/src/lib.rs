@@ -1780,6 +1780,7 @@ macro_rules! r2array2 {
                 }
             }
         }
+
         impl RArrayConstructors<$tipe> for RArray<$tipe> {
             fn new<'a>(dim: &[usize], pc: &'a Pc) -> &'a mut Self {
                 let dim = dim
