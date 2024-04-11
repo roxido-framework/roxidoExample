@@ -15,11 +15,11 @@ fn convolve2(a: &[f64], b: &[f64]) {
 
 #[roxido]
 fn convolve2a(a: SEXP, b: SEXP) {
-    let a = RObject::from_sexp(a, pc);
+    let a = unsafe { RObject::from_sexp(a, pc) };
     let a = a.as_vector().stop_str("'a' is not a vector.");
     let a = a.as_f64().stop_str("'a' is not of storage mode 'double'.");
     let a = a.slice();
-    let b = RObject::from_sexp(b, pc);
+    let b = unsafe { RObject::from_sexp(b, pc) };
     let b = b.as_vector().stop_str("'a' is not a vector.");
     let b = b.as_f64().stop_str("'a' is not of storage mode 'double'.");
     let b = b.slice();

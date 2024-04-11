@@ -60,43 +60,43 @@ use std::marker::PhantomData;
 
 static TOO_LONG: &str = "Could not fit usize into i32.";
 
-pub trait TransmutableToSEXPVariant {
+trait SEXPMethods {
     /// # Safety
     /// Expert use only.
-    unsafe fn transmute<T: SEXPVariant, A>(self, _anchor: &A) -> &T;
+    unsafe fn transmute<T: RObjectVariant, A>(self, _anchor: &A) -> &T;
 
     /// # Safety
     /// Expert use only.
     #[allow(clippy::mut_from_ref)]
-    unsafe fn transmute_mut<T: SEXPVariant, A>(self, _anchor: &A) -> &mut T;
+    unsafe fn transmute_mut<T: RObjectVariant, A>(self, _anchor: &A) -> &mut T;
 
     /// # Safety
     /// Expert use only.
-    unsafe fn transmute_static<T: SEXPVariant>(self) -> &'static T;
+    unsafe fn transmute_static<T: RObjectVariant>(self) -> &'static T;
 }
 
-impl TransmutableToSEXPVariant for SEXP {
-    unsafe fn transmute<T: SEXPVariant, A>(self, _anchor: &A) -> &T {
+impl SEXPMethods for SEXP {
+    unsafe fn transmute<T: RObjectVariant, A>(self, _anchor: &A) -> &T {
         unsafe { &*self.cast::<T>() }
     }
 
-    unsafe fn transmute_mut<T: SEXPVariant, A>(self, _anchor: &A) -> &mut T {
+    unsafe fn transmute_mut<T: RObjectVariant, A>(self, _anchor: &A) -> &mut T {
         unsafe { &mut *self.cast::<T>() }
     }
 
-    unsafe fn transmute_static<T: SEXPVariant>(self) -> &'static T {
+    unsafe fn transmute_static<T: RObjectVariant>(self) -> &'static T {
         unsafe { &*self.cast::<T>() }
     }
 }
 
-pub trait SEXPVariant: Sized {
+pub trait RObjectVariant: Sized {
     fn sexp(&self) -> SEXP {
         self as *const Self as SEXP
     }
 
     /// # Safety
     /// Expert use only.
-    unsafe fn transmute<T: SEXPVariant>(&self) -> &T
+    unsafe fn transmute<T: RObjectVariant>(&self) -> &T
     where
         Self: Sized,
     {
@@ -105,7 +105,7 @@ pub trait SEXPVariant: Sized {
 
     /// # Safety
     /// Expert use only.
-    unsafe fn transmute_mut<T: SEXPVariant>(&mut self) -> &mut T
+    unsafe fn transmute_mut<T: RObjectVariant>(&mut self) -> &mut T
     where
         Self: Sized,
     {
@@ -141,14 +141,20 @@ pub trait SEXPVariant: Sized {
     }
 
     /// Set an attribute.
-    fn set_attribute(&mut self, which: &RSymbol, value: &impl SEXPVariant) {
+    fn set_attribute(&mut self, which: &RSymbol, value: &impl RObjectVariant) {
         unsafe {
             Rf_setAttrib(self.sexp(), which.sexp(), value.sexp());
         }
     }
 }
 
-pub trait RHasLength: SEXPVariant {
+pub trait RSliceable<T> {
+    fn slice(&self) -> &[T];
+
+    fn slice_mut(&mut self) -> &mut [T];
+}
+
+pub trait RHasLength: RObjectVariant {
     /// Returns the length of the RObject.
     fn len(&self) -> usize {
         let len = unsafe { Rf_xlength(self.sexp()) };
@@ -187,12 +193,6 @@ pub trait RHasNames: RHasLength {
 pub trait RScalarConstructor<T> {
     #[allow(clippy::mut_from_ref)]
     fn from_value(value: T, pc: &Pc) -> &mut Self;
-}
-
-pub trait RSliceable<T> {
-    fn slice(&self) -> &[T];
-
-    fn slice_mut(&mut self) -> &mut [T];
 }
 
 pub trait RFromIterator<T> {
@@ -270,13 +270,28 @@ pub trait RArrayConstructors<T> {
     fn from_value<'a>(value: T, dim: &[usize], pc: &'a Pc) -> &'a mut Self;
 }
 
+fn charsxp_from_str(x: &str) -> SEXP {
+    unsafe {
+        Rf_mkCharLenCE(
+            x.as_ptr() as *const c_char,
+            x.len().try_into().stop_str(TOO_LONG),
+            cetype_t_CE_UTF8,
+        )
+    }
+}
+
+fn charsxp_as_str<T>(sexp: SEXP, _anchor: &T) -> Result<&str, &'static str> {
+    let c_str = unsafe { CStr::from_ptr(R_CHAR(sexp) as *const c_char) };
+    c_str.to_str().map_err(|_| "Not valid UTF8.")
+}
+
 macro_rules! sexp_variant {
     ($name:ident) => {
         #[repr(C)]
         pub struct $name {
             sexprec: SEXPREC,
         }
-        impl SEXPVariant for $name {}
+        impl RObjectVariant for $name {}
     };
 }
 
@@ -287,7 +302,6 @@ sexp_variant!(RDataFrame);
 sexp_variant!(RFunction);
 sexp_variant!(RExternalPtr);
 sexp_variant!(RError);
-sexp_variant!(RCharsxp);
 
 macro_rules! sexp_variant_with_type {
     ($name:ident) => {
@@ -296,7 +310,7 @@ macro_rules! sexp_variant_with_type {
             pub sexprec: SEXPREC,
             rtype: PhantomData<RMode>,
         }
-        impl<T> SEXPVariant for $name<T> {}
+        impl<T> RObjectVariant for $name<T> {}
         impl<T> RHasLength for $name<T> {}
     };
 }
@@ -356,7 +370,7 @@ impl Pc {
     /// # Safety
     /// Expert use only.
     #[allow(clippy::mut_from_ref)]
-    pub unsafe fn protect_and_transmute<T: SEXPVariant>(&self, sexp: SEXP) -> &mut T {
+    pub unsafe fn protect_and_transmute<T: RObjectVariant>(&self, sexp: SEXP) -> &mut T {
         let sexp = self.protect(sexp);
         unsafe { sexp.transmute_mut(self) }
     }
@@ -477,13 +491,13 @@ impl R {
 
 impl RObject {
     #[allow(clippy::not_unsafe_ptr_arg_deref)]
-    pub fn from_sexp<A>(sexp: SEXP, anchor: &A) -> &Self {
+    pub unsafe fn from_sexp<A>(sexp: SEXP, anchor: &A) -> &Self {
         unsafe { sexp.transmute(anchor) }
     }
 
     #[allow(clippy::not_unsafe_ptr_arg_deref)]
     #[allow(clippy::mut_from_ref)]
-    pub fn from_sexp_mut<A>(sexp: SEXP, anchor: &A) -> &mut Self {
+    pub unsafe fn from_sexp_mut<A>(sexp: SEXP, anchor: &A) -> &mut Self {
         unsafe { sexp.transmute_mut(anchor) }
     }
 
@@ -727,7 +741,7 @@ impl RSymbol {
     /// Define a new symbol.
     #[allow(clippy::mut_from_ref)]
     pub fn new<'a>(x: &str, pc: &'a Pc) -> &'a mut Self {
-        unsafe { RCharsxp::new(x, pc).transmute_mut() }
+        unsafe { charsxp_from_str(x).transmute_mut(pc) }
     }
 
     /// Get R's "dim" symbol.
@@ -776,7 +790,7 @@ impl RFunction {
     }
 
     /// Evaluate a function with 1 parameter.
-    pub fn call1<'a>(&self, arg1: &impl SEXPVariant, pc: &'a Pc) -> Result<&'a RObject, i32> {
+    pub fn call1<'a>(&self, arg1: &impl RObjectVariant, pc: &'a Pc) -> Result<&'a RObject, i32> {
         let expression = unsafe { Rf_lang2(self.sexp(), arg1.sexp()) };
         Self::eval(expression, pc)
     }
@@ -784,8 +798,8 @@ impl RFunction {
     /// Evaluate a function with 2 parameters.
     pub fn call2<'a>(
         &self,
-        arg1: &impl SEXPVariant,
-        arg2: &impl SEXPVariant,
+        arg1: &impl RObjectVariant,
+        arg2: &impl RObjectVariant,
         pc: &'a Pc,
     ) -> Result<&'a RObject, i32> {
         let expression = unsafe { Rf_lang3(self.sexp(), arg1.sexp(), arg2.sexp()) };
@@ -795,9 +809,9 @@ impl RFunction {
     /// Evaluate a function with 3 parameters.
     pub fn call3<'a>(
         &self,
-        arg1: &impl SEXPVariant,
-        arg2: &impl SEXPVariant,
-        arg3: &impl SEXPVariant,
+        arg1: &impl RObjectVariant,
+        arg2: &impl RObjectVariant,
+        arg3: &impl RObjectVariant,
         pc: &'a Pc,
     ) -> Result<&'a RObject, i32> {
         let expression = unsafe { Rf_lang4(self.sexp(), arg1.sexp(), arg2.sexp(), arg3.sexp()) };
@@ -807,10 +821,10 @@ impl RFunction {
     /// Evaluate a function with 4 parameters.
     pub fn call4<'a>(
         &self,
-        arg1: &impl SEXPVariant,
-        arg2: &impl SEXPVariant,
-        arg3: &impl SEXPVariant,
-        arg4: &impl SEXPVariant,
+        arg1: &impl RObjectVariant,
+        arg2: &impl RObjectVariant,
+        arg3: &impl RObjectVariant,
+        arg4: &impl RObjectVariant,
         pc: &'a Pc,
     ) -> Result<&'a RObject, i32> {
         let expression = unsafe {
@@ -828,11 +842,11 @@ impl RFunction {
     /// Evaluate a function with 5 parameters.
     pub fn call5<'a>(
         &self,
-        arg1: &impl SEXPVariant,
-        arg2: &impl SEXPVariant,
-        arg3: &impl SEXPVariant,
-        arg4: &impl SEXPVariant,
-        arg5: &impl SEXPVariant,
+        arg1: &impl RObjectVariant,
+        arg2: &impl RObjectVariant,
+        arg3: &impl RObjectVariant,
+        arg4: &impl RObjectVariant,
+        arg5: &impl RObjectVariant,
         pc: &'a Pc,
     ) -> Result<&'a RObject, i32> {
         let expression = unsafe {
@@ -995,8 +1009,8 @@ impl RScalar {
 
     /// Check if appropriate to characterize as a str reference.
     pub fn str<'a>(&'a self, pc: &'a Pc) -> &'a str {
-        let s: &RVector<char> = unsafe { self.to_char(pc).transmute() }; // DBD
-        s.get(0).unwrap()
+        let s = self.to_char(pc);
+        s.get().unwrap()
     }
 
     /// Check if RObject can be interpreted as an NA value in R.
@@ -1073,13 +1087,7 @@ impl RScalarConstructor<bool> for RScalar<bool> {
 impl RScalarConstructor<&str> for RScalar<char> {
     #[allow(clippy::mut_from_ref)]
     fn from_value<'a>(value: &str, pc: &'a Pc) -> &'a mut Self {
-        unsafe {
-            pc.protect_and_transmute(Rf_ScalarString(pc.protect(Rf_mkCharLenCE(
-                value.as_ptr() as *const c_char,
-                value.len().try_into().stop_str(TOO_LONG),
-                cetype_t_CE_UTF8,
-            ))))
-        }
+        unsafe { pc.protect_and_transmute(Rf_ScalarString(pc.protect(charsxp_from_str(value)))) }
     }
 }
 
@@ -1358,32 +1366,13 @@ impl RGetSet0<bool> for RScalar<bool> {
     }
 }
 
-impl RCharsxp {
-    #[allow(clippy::mut_from_ref)]
-    fn new<'a>(x: &str, pc: &'a Pc) -> &'a mut Self {
-        unsafe {
-            pc.protect_and_transmute(Rf_mkCharLenCE(
-                x.as_ptr() as *const c_char,
-                x.len().try_into().stop_str(TOO_LONG),
-                cetype_t_CE_UTF8,
-            ))
-        }
-    }
-
-    fn as_str<'a>(&self) -> Result<&'a str, &'static str> {
-        let c_str = unsafe { CStr::from_ptr(R_CHAR(self.sexp()) as *const c_char) };
-        c_str.to_str().map_err(|_| "Not valid UTF8.")
-    }
-}
-
 impl RScalar<char> {
     pub fn get(&self) -> Result<&str, &'static str> {
-        let x: &RCharsxp = unsafe { STRING_ELT(self.sexp(), 0).transmute(self) };
-        x.as_str()
+        charsxp_as_str(unsafe { STRING_ELT(self.sexp(), 0) }, self)
     }
 
-    pub fn set(&mut self, value: &str, pc: &Pc) {
-        unsafe { SET_STRING_ELT(self.sexp(), 0, RCharsxp::new(value, pc).sexp()) }
+    pub fn set(&mut self, value: &str) {
+        unsafe { SET_STRING_ELT(self.sexp(), 0, charsxp_from_str(value)) }
     }
 }
 
@@ -1482,7 +1471,7 @@ impl RFromIterator<bool> for RVector<bool> {
         let result = Self::new(iter.len(), pc);
         let slice = result.slice_mut();
         for (s, d) in slice.iter_mut().zip(iter) {
-            *s = d as i32;
+            *s = R::as_logical(d);
         }
         result
     }
@@ -1494,7 +1483,7 @@ impl RFromIterator<bool> for RVector<bool> {
         let result = Self::new(iter.len(), pc);
         let slice = result.slice_mut();
         for (s, d) in slice.iter_mut().zip(iter) {
-            *s = *d as i32;
+            *s = R::as_logical(*d);
         }
         result
     }
@@ -1555,7 +1544,7 @@ impl RVectorConstructors<bool> for RVector<bool> {
     fn from_value(value: bool, length: usize, pc: &Pc) -> &mut Self {
         let result = Self::new(length, pc);
         let slice = result.slice_mut();
-        slice.fill(value as i32);
+        slice.fill(R::as_logical(value));
         result
     }
 
@@ -1588,19 +1577,12 @@ impl RVector<char> {
 
     fn get_unchecked(&self, index: usize) -> Result<&str, &'static str> {
         let sexp = unsafe { STRING_ELT(self.sexp(), index.try_into().unwrap()) };
-        let c_str = unsafe { CStr::from_ptr(R_CHAR(sexp) as *const c_char) };
-        c_str.to_str().map_err(|_| "Not valid UTF8.")
+        charsxp_as_str(sexp, self)
     }
 
     fn set_unchecked(&mut self, index: usize, value: &str) {
-        let sexp = unsafe {
-            // Doesn't need protection because it's immediately set to a protected object. // DBD?
-            Rf_mkCharLenCE(
-                value.as_ptr() as *const c_char,
-                value.len().try_into().unwrap(),
-                cetype_t_CE_UTF8,
-            )
-        };
+        // Doesn't need protection because it's immediately set to a protected object.
+        let sexp = charsxp_from_str(value);
         unsafe { SET_STRING_ELT(self.sexp(), index.try_into().unwrap(), sexp) };
     }
 }
@@ -1618,13 +1600,7 @@ impl RVectorConstructors<&str> for RVector<char> {
         let length_i32 = length.try_into().stop_str(TOO_LONG);
         let vec = pc.protect(unsafe { Rf_allocVector(STRSXP, length_i32) });
         if length_i32 > 0 {
-            let element = pc.protect(unsafe {
-                Rf_mkCharLenCE(
-                    value.as_ptr() as *const c_char,
-                    value.len().try_into().unwrap(),
-                    cetype_t_CE_UTF8,
-                )
-            });
+            let element = pc.protect(charsxp_from_str(value));
             unsafe { SET_STRING_ELT(vec, 0, element) };
             for index in 1..length_i32 {
                 unsafe { SET_STRING_ELT(vec, index, pc.protect(Rf_duplicate(element))) };
@@ -1972,7 +1948,7 @@ macro_rules! rlistlike {
             pub fn set(
                 &mut self,
                 index: usize,
-                value: &impl SEXPVariant,
+                value: &impl RObjectVariant,
             ) -> Result<(), &'static str> {
                 if index < self.len() {
                     unsafe { SET_VECTOR_ELT(self.sexp(), index.try_into().unwrap(), value.sexp()) };
@@ -2067,7 +2043,7 @@ impl RExternalPtr {
     #[allow(clippy::mut_from_ref)]
     pub fn encode_full<'a, T>(
         x: T,
-        tag: &impl SEXPVariant,
+        tag: &impl RObjectVariant,
         managed_by_r: bool,
         pc: &'a Pc,
     ) -> &'a mut Self {
@@ -2194,7 +2170,7 @@ impl RExternalPtr {
 }
 
 // Conversions
-pub trait FromR<T: SEXPVariant, U> {
+pub trait FromR<T: RObjectVariant, U> {
     fn from_r(x: &T, pc: &Pc) -> Result<Self, U>
     where
         Self: Sized;
@@ -2231,19 +2207,19 @@ impl ToRScalar<i32> for usize {
 /// Trait for converting objects to RObjects.
 pub trait ToRObject2 {
     #[allow(clippy::mut_from_ref)]
-    fn to_r(self, pc: &Pc) -> &impl SEXPVariant;
+    fn to_r(self, pc: &Pc) -> &impl RObjectVariant;
 }
 
 /// Trait for converting objects to RObjects.
 pub trait ToRObject2Mut {
     #[allow(clippy::mut_from_ref)]
-    fn to_r(self, pc: &Pc) -> &mut impl SEXPVariant;
+    fn to_r(self, pc: &Pc) -> &mut impl RObjectVariant;
 }
 
 /// Trait for converting objects to RObjects.
 pub trait ToRObject2Mut2 {
     #[allow(clippy::mut_from_ref)]
-    fn to_r<'a>(&self, pc: &'a Pc) -> &'a mut impl SEXPVariant;
+    fn to_r<'a>(&self, pc: &'a Pc) -> &'a mut impl RObjectVariant;
 }
 
 /// Trait for converting objects to RObjects.
@@ -2307,20 +2283,20 @@ to_rvector24!(u8, u8);
 to_rvector24!(bool, bool);
 
 impl ToRObject2 for () {
-    fn to_r(self, pc: &Pc) -> &impl SEXPVariant {
+    fn to_r(self, pc: &Pc) -> &impl RObjectVariant {
         unsafe { R_NilValue.transmute_mut::<RObject, Pc>(pc) }
     }
 }
 
 impl ToRObject2 for SEXP {
     #[allow(clippy::not_unsafe_ptr_arg_deref)]
-    fn to_r(self, pc: &Pc) -> &impl SEXPVariant {
+    fn to_r(self, pc: &Pc) -> &impl RObjectVariant {
         unsafe { self.transmute::<RObject, Pc>(pc) }
     }
 }
 
-impl<T: SEXPVariant> ToRObject2 for &T {
-    fn to_r(self, pc: &Pc) -> &impl SEXPVariant {
+impl<T: RObjectVariant> ToRObject2 for &T {
+    fn to_r(self, pc: &Pc) -> &impl RObjectVariant {
         unsafe { self.sexp().transmute::<RObject, Pc>(pc) }
     }
 }
