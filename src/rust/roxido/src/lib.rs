@@ -2178,14 +2178,29 @@ pub trait FromR<T: RObjectVariant, U> {
 }
 
 /// Trait for converting objects to RObjects.
-pub trait ToRScalar<RMode> {
+pub trait ToR1<T: RObjectVariant> {
     #[allow(clippy::mut_from_ref)]
-    fn to_r(self, pc: &Pc) -> &mut RScalar<RMode>;
+    fn to_r(self, pc: &Pc) -> &mut T;
+}
+
+pub trait ToR2<T: RObjectVariant> {
+    #[allow(clippy::mut_from_ref)]
+    fn to_r(self, pc: &Pc) -> &mut T;
+}
+
+pub trait ToR3<T: RObjectVariant> {
+    #[allow(clippy::mut_from_ref)]
+    fn to_r<'a>(self, pc: &'a Pc) -> &'a T;
+}
+
+pub trait ToR4<T: RObjectVariant> {
+    #[allow(clippy::mut_from_ref)]
+    fn to_r<'a>(&self, pc: &'a Pc) -> &'a mut T;
 }
 
 macro_rules! to_rscalar {
     ($tipe:ty, $tipe2:ty) => {
-        impl<'a> ToRScalar<$tipe> for $tipe2 {
+        impl<'a> ToR1<RScalar<$tipe>> for $tipe2 {
             fn to_r(self, pc: &Pc) -> &mut RScalar<$tipe> {
                 RScalar::from_value(self, pc)
             }
@@ -2199,55 +2214,20 @@ to_rscalar!(u8, u8);
 to_rscalar!(bool, bool);
 to_rscalar!(char, &str);
 
-impl ToRScalar<i32> for usize {
+impl ToR1<RScalar<i32>> for usize {
     fn to_r(self, pc: &Pc) -> &mut RScalar<i32> {
         RScalar::from_value(self.try_into().stop_str(TOO_LONG), pc)
     }
 }
 
-/// Trait for converting objects to RObjects.
-pub trait ToRObject2 {
-    #[allow(clippy::mut_from_ref)]
-    fn to_r(self, pc: &Pc) -> &impl RObjectVariant;
-}
-
-/// Trait for converting objects to RObjects.
-pub trait ToRObject2Mut {
-    #[allow(clippy::mut_from_ref)]
-    fn to_r(self, pc: &Pc) -> &mut impl RObjectVariant;
-}
-
-/// Trait for converting objects to RObjects.
-pub trait ToRObject2Mut2 {
-    #[allow(clippy::mut_from_ref)]
-    fn to_r<'a>(&self, pc: &'a Pc) -> &'a mut impl RObjectVariant;
-}
-
-/// Trait for converting objects to RObjects.
-pub trait ToRVector2<RMode> {
-    #[allow(clippy::mut_from_ref)]
-    fn to_r(self, pc: &Pc) -> &mut RVector<RMode>;
-}
-
-/// Trait for converting iterators to RObjects.
-pub trait ToRVector22<RMode> {
-    #[allow(clippy::mut_from_ref)]
-    fn to_r(self, pc: &Pc) -> &mut RVector<RMode>;
-}
-
-pub trait ToRVector33<RMode> {
-    #[allow(clippy::mut_from_ref)]
-    fn to_r(self, pc: &Pc) -> &mut RVector<RMode>;
-}
-
-macro_rules! to_rvector2 {
+macro_rules! to_rvector {
     ($tipe:ty, $tipe2:ty) => {
-        impl<'a, const N: usize> ToRVector22<$tipe> for [$tipe2; N] {
+        impl<'a, const N: usize> ToR1<RVector<$tipe>> for [$tipe2; N] {
             fn to_r(self, pc: &Pc) -> &mut RVector<$tipe> {
                 RVector::from_array(self, pc)
             }
         }
-        impl<'a> ToRVector2<$tipe> for &[$tipe2] {
+        impl<'a> ToR1<RVector<$tipe>> for &[$tipe2] {
             fn to_r(self, pc: &Pc) -> &mut RVector<$tipe> {
                 RVector::from_slice(self, pc)
             }
@@ -2255,22 +2235,24 @@ macro_rules! to_rvector2 {
     };
 }
 
-to_rvector2!(f64, f64);
-to_rvector2!(i32, i32);
-to_rvector2!(u8, u8);
-to_rvector2!(bool, bool);
-to_rvector2!(char, &str);
+to_rvector!(f64, f64);
+to_rvector!(i32, i32);
+to_rvector!(u8, u8);
+to_rvector!(bool, bool);
+to_rvector!(char, &str);
 
-macro_rules! to_rvector24 {
+macro_rules! to_rvector_iter {
     ($tipe:ty, $tipe2:ty) => {
-        impl<'a, T: IntoIterator<Item = $tipe2> + ExactSizeIterator> ToRVector33<$tipe> for T {
+        impl<'a, T: IntoIterator<Item = $tipe2> + ExactSizeIterator> ToR2<RVector<$tipe>> for T {
             fn to_r(self, pc: &Pc) -> &mut RVector<$tipe> {
                 RVector::from_iter1(self, pc)
             }
         }
     };
     ($tipe:ty, $tipe2:ty) => {
-        impl<'a, T: IntoIterator<Item = &'a $tipe2> + ExactSizeIterator> ToRVector33<$tipe> for T {
+        impl<'a, T: IntoIterator<Item = &'a $tipe2> + ExactSizeIterator> ToR1<RVector<$tipe>>
+            for T
+        {
             fn to_r(self, pc: &Pc) -> &mut RVector<$tipe> {
                 RVector::from_iter2(self, pc)
             }
@@ -2278,26 +2260,26 @@ macro_rules! to_rvector24 {
     };
 }
 
-to_rvector24!(f64, f64);
-to_rvector24!(i32, i32);
-to_rvector24!(u8, u8);
-to_rvector24!(bool, bool);
+to_rvector_iter!(f64, f64);
+to_rvector_iter!(i32, i32);
+to_rvector_iter!(u8, u8);
+to_rvector_iter!(bool, bool);
 
-impl ToRObject2 for () {
-    fn to_r(self, pc: &Pc) -> &impl RObjectVariant {
+impl ToR3<RObject> for () {
+    fn to_r(self, pc: &Pc) -> &RObject {
         unsafe { R_NilValue.transmute_mut::<RObject, Pc>(pc) }
     }
 }
 
-impl ToRObject2 for SEXP {
+impl ToR3<RObject> for SEXP {
     #[allow(clippy::not_unsafe_ptr_arg_deref)]
-    fn to_r(self, pc: &Pc) -> &impl RObjectVariant {
+    fn to_r(self, pc: &Pc) -> &RObject {
         unsafe { self.transmute::<RObject, Pc>(pc) }
     }
 }
 
-impl<T: RObjectVariant> ToRObject2 for &T {
-    fn to_r(self, pc: &Pc) -> &impl RObjectVariant {
+impl<T: RObjectVariant> ToR3<RObject> for &T {
+    fn to_r(self, pc: &Pc) -> &RObject {
         unsafe { self.sexp().transmute::<RObject, Pc>(pc) }
     }
 }
