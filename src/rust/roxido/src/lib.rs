@@ -58,8 +58,6 @@ use std::collections::HashMap;
 use std::ffi::{c_char, c_void, CStr};
 use std::marker::PhantomData;
 
-static TOO_LONG: &str = "Could not fit usize into i32.";
-
 trait SEXPMethods {
     /// # Safety
     /// Expert use only.
@@ -270,6 +268,8 @@ pub trait RArrayConstructors<T> {
     fn from_value<'a>(value: T, dim: &[usize], pc: &'a Pc) -> &'a mut Self;
 }
 
+static TOO_LONG: &str = "Could not fit usize into i32.";
+
 fn charsxp_from_str(x: &str) -> SEXP {
     unsafe {
         Rf_mkCharLenCE(
@@ -285,7 +285,7 @@ fn charsxp_as_str<T>(sexp: SEXP, _anchor: &T) -> Result<&str, &'static str> {
     c_str.to_str().map_err(|_| "Not valid UTF8.")
 }
 
-macro_rules! sexp_variant {
+macro_rules! robject_variant {
     ($name:ident) => {
         #[repr(C)]
         pub struct $name {
@@ -295,15 +295,15 @@ macro_rules! sexp_variant {
     };
 }
 
-sexp_variant!(RObject);
-sexp_variant!(RSymbol);
-sexp_variant!(RList);
-sexp_variant!(RDataFrame);
-sexp_variant!(RFunction);
-sexp_variant!(RExternalPtr);
-sexp_variant!(RError);
+robject_variant!(RObject);
+robject_variant!(RSymbol);
+robject_variant!(RList);
+robject_variant!(RDataFrame);
+robject_variant!(RFunction);
+robject_variant!(RExternalPtr);
+robject_variant!(RError);
 
-macro_rules! sexp_variant_with_type {
+macro_rules! robject_variant_with_type {
     ($name:ident) => {
         #[repr(C)]
         pub struct $name<RMode = ()> {
@@ -315,10 +315,10 @@ macro_rules! sexp_variant_with_type {
     };
 }
 
-sexp_variant_with_type!(RScalar);
-sexp_variant_with_type!(RVector);
-sexp_variant_with_type!(RMatrix);
-sexp_variant_with_type!(RArray);
+robject_variant_with_type!(RScalar);
+robject_variant_with_type!(RVector);
+robject_variant_with_type!(RMatrix);
+robject_variant_with_type!(RArray);
 
 impl RHasLength for RList {}
 impl RHasLength for RDataFrame {}
@@ -340,9 +340,9 @@ impl Default for Pc {
 
 impl Drop for Pc {
     fn drop(&mut self) {
-        let count = self.counter.borrow();
-        if *self.counter.borrow() > 0 {
-            unsafe { Rf_unprotect(*count) };
+        let count = *self.counter.borrow();
+        if count > 0 {
+            unsafe { Rf_unprotect(count) };
         }
     }
 }
@@ -1062,7 +1062,7 @@ impl RScalar {
     }
 }
 
-macro_rules! r2scalar2 {
+macro_rules! rscalar_constructor {
     ($tipe:ty, $code:expr) => {
         impl RScalarConstructor<$tipe> for RScalar<$tipe> {
             #[allow(clippy::mut_from_ref)]
@@ -1073,9 +1073,9 @@ macro_rules! r2scalar2 {
     };
 }
 
-r2scalar2!(f64, Rf_ScalarReal);
-r2scalar2!(i32, Rf_ScalarInteger);
-r2scalar2!(u8, Rf_ScalarRaw);
+rscalar_constructor!(f64, Rf_ScalarReal);
+rscalar_constructor!(i32, Rf_ScalarInteger);
+rscalar_constructor!(u8, Rf_ScalarRaw);
 
 impl RScalarConstructor<bool> for RScalar<bool> {
     #[allow(clippy::mut_from_ref)]
@@ -1338,7 +1338,7 @@ rsliceable!(RArray, i32, i32, INTEGER);
 rsliceable!(RArray, u8, u8, RAW);
 rsliceable!(RArray, bool, i32, LOGICAL);
 
-macro_rules! r2scalar_getset2 {
+macro_rules! rscalar_getset {
     ($tipe:ty, $tipe2:ty, $get:expr, $set:expr) => {
         impl RGetSet0<$tipe2> for RScalar<$tipe> {
             fn get(&self) -> $tipe2 {
@@ -1352,9 +1352,9 @@ macro_rules! r2scalar_getset2 {
     };
 }
 
-r2scalar_getset2!(f64, f64, REAL_ELT, SET_REAL_ELT);
-r2scalar_getset2!(i32, i32, INTEGER_ELT, SET_INTEGER_ELT);
-r2scalar_getset2!(u8, u8, RAW_ELT, SET_RAW_ELT);
+rscalar_getset!(f64, f64, REAL_ELT, SET_REAL_ELT);
+rscalar_getset!(i32, i32, INTEGER_ELT, SET_INTEGER_ELT);
+rscalar_getset!(u8, u8, RAW_ELT, SET_RAW_ELT);
 
 impl RGetSet0<bool> for RScalar<bool> {
     fn get(&self) -> bool {
@@ -1376,7 +1376,7 @@ impl RScalar<char> {
     }
 }
 
-macro_rules! r2vector2 {
+macro_rules! rvector {
     ($tipe:ty, $code:expr, $ptr:expr, $get:expr, $set:expr) => {
         impl RFromIterator<$tipe> for RVector<$tipe> {
             fn from_iter1<T>(iter: T, pc: &Pc) -> &mut Self
@@ -1459,9 +1459,9 @@ macro_rules! r2vector2 {
     };
 }
 
-r2vector2!(f64, REALSXP, REAL, REAL_ELT, SET_REAL_ELT);
-r2vector2!(i32, INTSXP, INTEGER, INTEGER_ELT, SET_INTEGER_ELT);
-r2vector2!(u8, RAWSXP, RAW, RAW_ELT, SET_RAW_ELT);
+rvector!(f64, REALSXP, REAL, REAL_ELT, SET_REAL_ELT);
+rvector!(i32, INTSXP, INTEGER, INTEGER_ELT, SET_INTEGER_ELT);
+rvector!(u8, RAWSXP, RAW, RAW_ELT, SET_RAW_ELT);
 
 impl RFromIterator<bool> for RVector<bool> {
     fn from_iter1<T>(iter: T, pc: &Pc) -> &mut Self
@@ -1628,7 +1628,7 @@ impl RVectorConstructors<&str> for RVector<char> {
     }
 }
 
-macro_rules! r2matrix2 {
+macro_rules! rmatrix {
     ($tipe:ty, $code:expr, $get:expr, $set:expr) => {
         impl RGetSet2<$tipe> for RMatrix<$tipe> {
             /// Get the value at a certain index in an $tipe RMatrix.
@@ -1674,9 +1674,9 @@ macro_rules! r2matrix2 {
     };
 }
 
-r2matrix2!(f64, REALSXP, REAL_ELT, SET_REAL_ELT);
-r2matrix2!(i32, INTSXP, INTEGER_ELT, SET_INTEGER_ELT);
-r2matrix2!(u8, RAWSXP, RAW_ELT, SET_RAW_ELT);
+rmatrix!(f64, REALSXP, REAL_ELT, SET_REAL_ELT);
+rmatrix!(i32, INTSXP, INTEGER_ELT, SET_INTEGER_ELT);
+rmatrix!(u8, RAWSXP, RAW_ELT, SET_RAW_ELT);
 
 impl<T> RMatrix<T> {
     /// Returns the number of rows in the RMatrix.
@@ -1757,7 +1757,7 @@ impl<T> RMatrix<T> {
     }
 }
 
-macro_rules! r2array2 {
+macro_rules! rarray {
     ($tipe:ty, $code:expr, $get:expr, $set:expr) => {
         impl RGetSetN<$tipe> for RArray<$tipe> {
             /// Get the value at a certain index in an $tipe RArray.
@@ -1800,9 +1800,9 @@ macro_rules! r2array2 {
     };
 }
 
-r2array2!(f64, REALSXP, REAL_ELT, SET_REAL_ELT);
-r2array2!(i32, INTSXP, INTEGER_ELT, SET_INTEGER_ELT);
-r2array2!(u8, RAWSXP, RAW_ELT, SET_RAW_ELT);
+rarray!(f64, REALSXP, REAL_ELT, SET_REAL_ELT);
+rarray!(i32, INTSXP, INTEGER_ELT, SET_INTEGER_ELT);
+rarray!(u8, RAWSXP, RAW_ELT, SET_RAW_ELT);
 
 impl<T> RArray<T> {
     /// Returns the dimensions of the RMatrix.
