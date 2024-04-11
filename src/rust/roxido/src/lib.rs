@@ -490,11 +490,15 @@ impl R {
 }
 
 impl RObject {
+    /// # Safety
+    /// Expert use only.
     #[allow(clippy::not_unsafe_ptr_arg_deref)]
     pub unsafe fn from_sexp<A>(sexp: SEXP, anchor: &A) -> &Self {
         unsafe { sexp.transmute(anchor) }
     }
 
+    /// # Safety
+    /// Expert use only.
     #[allow(clippy::not_unsafe_ptr_arg_deref)]
     #[allow(clippy::mut_from_ref)]
     pub unsafe fn from_sexp_mut<A>(sexp: SEXP, anchor: &A) -> &mut Self {
@@ -863,7 +867,15 @@ impl RFunction {
     }
 }
 
-impl RScalar {
+impl<T> RScalar<T> {
+    pub fn as_vector(&self) -> &RVector<T> {
+        unsafe { self.transmute() }
+    }
+
+    pub fn as_vector_mut(&mut self) -> &mut RVector<T> {
+        unsafe { self.transmute_mut() }
+    }
+
     /// Check if appropriate to characterize as an f64.
     pub fn f64(&self) -> f64 {
         unsafe { Rf_asReal(self.sexp()) }
@@ -1707,7 +1719,7 @@ impl<T> RMatrix<T> {
     }
 
     /// Manipulates the matrix in place to be a vector by dropping the `dim` attribute.
-    pub fn to_vector(&mut self) -> &mut RVector<T> {
+    pub fn to_vector_mut(&mut self) -> &mut RVector<T> {
         unsafe { Rf_setAttrib(self.sexp(), R_DimSymbol, R_NilValue).transmute_mut(self) }
     }
 
@@ -1812,7 +1824,7 @@ impl<T> RArray<T> {
     }
 
     /// Manipulates the matrix in place to be a vector by dropping the `dim` attribute.
-    pub fn to_vector(&mut self) -> &mut RVector<T> {
+    pub fn to_vector_mut(&mut self) -> &mut RVector<T> {
         unsafe { Rf_setAttrib(self.sexp(), R_DimSymbol, R_NilValue).transmute_mut(self) }
     }
 
@@ -2189,7 +2201,7 @@ pub trait ToR2<T: RObjectVariant> {
 
 pub trait ToR3<T: RObjectVariant> {
     #[allow(clippy::mut_from_ref)]
-    fn to_r<'a>(self, pc: &'a Pc) -> &'a T;
+    fn to_r(self, pc: &Pc) -> &T;
 }
 
 pub trait ToR4<T: RObjectVariant> {
