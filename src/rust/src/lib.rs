@@ -14,6 +14,26 @@ fn convolve2(a: &[f64], b: &[f64]) {
 }
 
 #[roxido]
+fn convolve2a(a: SEXP, b: SEXP) {
+    let a = RObject::from_sexp(a, pc);
+    let a = a.as_vector().stop_str("'a' is not a vector.");
+    let a = a.as_f64().stop_str("'a' is not of storage mode 'double'.");
+    let a = a.slice();
+    let b = RObject::from_sexp(b, pc);
+    let b = b.as_vector().stop_str("'a' is not a vector.");
+    let b = b.as_f64().stop_str("'a' is not of storage mode 'double'.");
+    let b = b.slice();
+    let vec = RVector::from_value(0.0, a.len() + b.len() - 1, pc);
+    let ab = vec.slice_mut();
+    for (i, ai) in a.iter().enumerate() {
+        for (j, bj) in b.iter().enumerate() {
+            ab[i + j] += ai * bj;
+        }
+    }
+    vec.sexp()
+}
+
+#[roxido]
 fn zero2(f: &RFunction, guess1: f64, guess2: f64, tol: f64) {
     if !tol.is_finite() || tol <= 0.0 {
         stop!("'tol' must be a strictly positive value.");

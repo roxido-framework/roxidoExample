@@ -47,41 +47,11 @@
 //   https://www.tidyverse.org/blog/2019/05/resource-cleanup-in-c-and-the-r-api
 //   https://github.com/wch/r-source
 
-pub mod rbindings;
-
 /// A procedural macro to facilitate calling a Rust function from R.
 pub use roxido_macro::roxido;
 
+pub mod rbindings;
 pub use rbindings::SEXP;
-
-pub trait SexpMethods {
-    /// # Safety
-    /// Expert use only.
-    unsafe fn transmute<T: IsRObject, A>(self, _anchor: &A) -> &T;
-
-    /// # Safety
-    /// Expert use only.
-    #[allow(clippy::mut_from_ref)]
-    unsafe fn transmute_mut<T: IsRObject, A>(self, _anchor: &A) -> &mut T;
-
-    /// # Safety
-    /// Expert use only.
-    unsafe fn transmute_static<T: IsRObject>(self) -> &'static T;
-}
-
-impl SexpMethods for SEXP {
-    unsafe fn transmute<T, A>(self, _anchor: &A) -> &T {
-        unsafe { &*self.cast::<T>() }
-    }
-
-    unsafe fn transmute_mut<T, A>(self, _anchor: &A) -> &mut T {
-        unsafe { &mut *self.cast::<T>() }
-    }
-
-    unsafe fn transmute_static<T>(self) -> &'static T {
-        unsafe { &*self.cast::<T>() }
-    }
-}
 
 use rbindings::*;
 use std::collections::HashMap;
@@ -90,16 +60,43 @@ use std::marker::PhantomData;
 
 static TOO_LONG: &str = "Could not fit usize into i32.";
 
-pub struct R;
+pub trait TransmutableToSEXPVariant {
+    /// # Safety
+    /// Expert use only.
+    unsafe fn transmute<T: SEXPVariant, A>(self, _anchor: &A) -> &T;
 
-pub trait IsRObject: Sized {
+    /// # Safety
+    /// Expert use only.
+    #[allow(clippy::mut_from_ref)]
+    unsafe fn transmute_mut<T: SEXPVariant, A>(self, _anchor: &A) -> &mut T;
+
+    /// # Safety
+    /// Expert use only.
+    unsafe fn transmute_static<T: SEXPVariant>(self) -> &'static T;
+}
+
+impl TransmutableToSEXPVariant for SEXP {
+    unsafe fn transmute<T: SEXPVariant, A>(self, _anchor: &A) -> &T {
+        unsafe { &*self.cast::<T>() }
+    }
+
+    unsafe fn transmute_mut<T: SEXPVariant, A>(self, _anchor: &A) -> &mut T {
+        unsafe { &mut *self.cast::<T>() }
+    }
+
+    unsafe fn transmute_static<T: SEXPVariant>(self) -> &'static T {
+        unsafe { &*self.cast::<T>() }
+    }
+}
+
+pub trait SEXPVariant: Sized {
     fn sexp(&self) -> SEXP {
         self as *const Self as SEXP
     }
 
     /// # Safety
     /// Expert use only.
-    unsafe fn transmute<T: IsRObject>(&self) -> &T
+    unsafe fn transmute<T: SEXPVariant>(&self) -> &T
     where
         Self: Sized,
     {
@@ -108,7 +105,7 @@ pub trait IsRObject: Sized {
 
     /// # Safety
     /// Expert use only.
-    unsafe fn transmute_mut<T: IsRObject>(&mut self) -> &mut T
+    unsafe fn transmute_mut<T: SEXPVariant>(&mut self) -> &mut T
     where
         Self: Sized,
     {
@@ -144,33 +141,14 @@ pub trait IsRObject: Sized {
     }
 
     /// Set an attribute.
-    fn set_attribute(&mut self, which: &RSymbol, value: &impl IsRObject) {
+    fn set_attribute(&mut self, which: &RSymbol, value: &impl SEXPVariant) {
         unsafe {
             Rf_setAttrib(self.sexp(), which.sexp(), value.sexp());
         }
     }
 }
 
-macro_rules! baseline {
-    ($name:ident) => {
-        #[repr(C)]
-        pub struct $name {
-            pub sexprec: SEXPREC,
-        }
-        impl IsRObject for $name {}
-    };
-}
-
-baseline!(RObject);
-baseline!(RSymbol);
-baseline!(RList);
-baseline!(RDataFrame);
-baseline!(RFunction);
-baseline!(RExternalPtr);
-baseline!(RError);
-baseline!(RCharsxp);
-
-pub trait RHasLength: IsRObject {
+pub trait RHasLength: SEXPVariant {
     /// Returns the length of the RObject.
     fn len(&self) -> usize {
         let len = unsafe { Rf_xlength(self.sexp()) };
@@ -206,25 +184,131 @@ pub trait RHasNames: RHasLength {
     }
 }
 
-macro_rules! baseline_with_type {
+pub trait RScalarConstructor<T> {
+    #[allow(clippy::mut_from_ref)]
+    fn from_value(value: T, pc: &Pc) -> &mut Self;
+}
+
+pub trait RSliceable<T> {
+    fn slice(&self) -> &[T];
+
+    fn slice_mut(&mut self) -> &mut [T];
+}
+
+pub trait RFromIterator<T> {
+    #[allow(clippy::mut_from_ref)]
+    fn from_iter1<S>(iter: S, pc: &Pc) -> &mut Self
+    where
+        S: IntoIterator<Item = T> + ExactSizeIterator;
+
+    #[allow(clippy::mut_from_ref)]
+    fn from_iter2<'a, 'b, S>(iter: S, pc: &'a Pc) -> &'a mut Self
+    where
+        S: IntoIterator<Item = &'b T> + ExactSizeIterator,
+        T: 'b;
+}
+
+pub trait RGetSet0<T> {
+    /// Get the value at a certain index in an $tipe RVector.
+    fn get(&self) -> T;
+
+    /// Set the value at a certain index in an $tipe RVector.
+    fn set(&mut self, value: T);
+}
+
+pub trait RGetSet1<T> {
+    /// Get the value at a certain index in an $tipe RVector.
+    fn get(&self, index: usize) -> Result<T, &'static str>;
+
+    /// Set the value at a certain index in an $tipe RVector.
+    fn set(&mut self, index: usize, value: T) -> Result<(), &'static str>;
+}
+
+pub trait RGetSet2<T> {
+    /// Get the value at a certain index in an $tipe RVector.
+    fn get(&self, row: usize, col: usize) -> Result<T, &'static str>;
+
+    /// Set the value at a certain index in an $tipe RVector.
+    fn set(&mut self, row: usize, col: usize, value: T) -> Result<(), &'static str>;
+}
+
+pub trait RGetSetN<T> {
+    /// Get the value at a certain index in an $tipe RVector.
+    fn get(&self, index: &[usize]) -> Result<T, &'static str>;
+
+    /// Set the value at a certain index in an $tipe RVector.
+    fn set(&mut self, index: &[usize], value: T) -> Result<(), &'static str>;
+}
+
+pub trait RVectorConstructors<T> {
+    #[allow(clippy::mut_from_ref)]
+    fn new(length: usize, pc: &Pc) -> &mut Self;
+
+    #[allow(clippy::mut_from_ref)]
+    fn from_value(value: T, length: usize, pc: &Pc) -> &mut Self;
+
+    #[allow(clippy::mut_from_ref)]
+    fn from_array<const N: usize>(slice: [T; N], pc: &Pc) -> &mut Self;
+
+    #[allow(clippy::mut_from_ref)]
+    fn from_slice<'a>(slice: &[T], pc: &'a Pc) -> &'a mut Self;
+}
+
+pub trait RMatrixConstructors<T> {
+    #[allow(clippy::mut_from_ref)]
+    fn new(nrow: usize, ncol: usize, pc: &Pc) -> &mut Self;
+
+    #[allow(clippy::mut_from_ref)]
+    fn from_value(value: T, nrow: usize, ncol: usize, pc: &Pc) -> &mut Self;
+}
+
+pub trait RArrayConstructors<T> {
+    #[allow(clippy::mut_from_ref)]
+    fn new<'a>(dim: &[usize], pc: &'a Pc) -> &'a mut Self;
+
+    #[allow(clippy::mut_from_ref)]
+    fn from_value<'a>(value: T, dim: &[usize], pc: &'a Pc) -> &'a mut Self;
+}
+
+macro_rules! sexp_variant {
+    ($name:ident) => {
+        #[repr(C)]
+        pub struct $name {
+            sexprec: SEXPREC,
+        }
+        impl SEXPVariant for $name {}
+    };
+}
+
+sexp_variant!(RObject);
+sexp_variant!(RSymbol);
+sexp_variant!(RList);
+sexp_variant!(RDataFrame);
+sexp_variant!(RFunction);
+sexp_variant!(RExternalPtr);
+sexp_variant!(RError);
+sexp_variant!(RCharsxp);
+
+macro_rules! sexp_variant_with_type {
     ($name:ident) => {
         #[repr(C)]
         pub struct $name<RMode = ()> {
             pub sexprec: SEXPREC,
             rtype: PhantomData<RMode>,
         }
-        impl<T> IsRObject for $name<T> {}
+        impl<T> SEXPVariant for $name<T> {}
         impl<T> RHasLength for $name<T> {}
     };
 }
 
-baseline_with_type!(RScalar);
-baseline_with_type!(RVector);
-baseline_with_type!(RMatrix);
-baseline_with_type!(RArray);
+sexp_variant_with_type!(RScalar);
+sexp_variant_with_type!(RVector);
+sexp_variant_with_type!(RMatrix);
+sexp_variant_with_type!(RArray);
 
 impl RHasLength for RList {}
 impl RHasLength for RDataFrame {}
+
 impl<T> RHasNames for RScalar<T> {}
 impl<T> RHasNames for RVector<T> {}
 impl RHasNames for RList {}
@@ -272,11 +356,13 @@ impl Pc {
     /// # Safety
     /// Expert use only.
     #[allow(clippy::mut_from_ref)]
-    pub unsafe fn protect_and_transmute<T: IsRObject>(&self, sexp: SEXP) -> &mut T {
+    pub unsafe fn protect_and_transmute<T: SEXPVariant>(&self, sexp: SEXP) -> &mut T {
         let sexp = self.protect(sexp);
         unsafe { sexp.transmute_mut(self) }
     }
 }
+
+pub struct R;
 
 impl R {
     /// Returns an R NULL value.
@@ -690,7 +776,7 @@ impl RFunction {
     }
 
     /// Evaluate a function with 1 parameter.
-    pub fn call1<'a>(&self, arg1: &impl IsRObject, pc: &'a Pc) -> Result<&'a RObject, i32> {
+    pub fn call1<'a>(&self, arg1: &impl SEXPVariant, pc: &'a Pc) -> Result<&'a RObject, i32> {
         let expression = unsafe { Rf_lang2(self.sexp(), arg1.sexp()) };
         Self::eval(expression, pc)
     }
@@ -698,8 +784,8 @@ impl RFunction {
     /// Evaluate a function with 2 parameters.
     pub fn call2<'a>(
         &self,
-        arg1: &impl IsRObject,
-        arg2: &impl IsRObject,
+        arg1: &impl SEXPVariant,
+        arg2: &impl SEXPVariant,
         pc: &'a Pc,
     ) -> Result<&'a RObject, i32> {
         let expression = unsafe { Rf_lang3(self.sexp(), arg1.sexp(), arg2.sexp()) };
@@ -709,9 +795,9 @@ impl RFunction {
     /// Evaluate a function with 3 parameters.
     pub fn call3<'a>(
         &self,
-        arg1: &impl IsRObject,
-        arg2: &impl IsRObject,
-        arg3: &impl IsRObject,
+        arg1: &impl SEXPVariant,
+        arg2: &impl SEXPVariant,
+        arg3: &impl SEXPVariant,
         pc: &'a Pc,
     ) -> Result<&'a RObject, i32> {
         let expression = unsafe { Rf_lang4(self.sexp(), arg1.sexp(), arg2.sexp(), arg3.sexp()) };
@@ -721,10 +807,10 @@ impl RFunction {
     /// Evaluate a function with 4 parameters.
     pub fn call4<'a>(
         &self,
-        arg1: &impl IsRObject,
-        arg2: &impl IsRObject,
-        arg3: &impl IsRObject,
-        arg4: &impl IsRObject,
+        arg1: &impl SEXPVariant,
+        arg2: &impl SEXPVariant,
+        arg3: &impl SEXPVariant,
+        arg4: &impl SEXPVariant,
         pc: &'a Pc,
     ) -> Result<&'a RObject, i32> {
         let expression = unsafe {
@@ -742,11 +828,11 @@ impl RFunction {
     /// Evaluate a function with 5 parameters.
     pub fn call5<'a>(
         &self,
-        arg1: &impl IsRObject,
-        arg2: &impl IsRObject,
-        arg3: &impl IsRObject,
-        arg4: &impl IsRObject,
-        arg5: &impl IsRObject,
+        arg1: &impl SEXPVariant,
+        arg2: &impl SEXPVariant,
+        arg3: &impl SEXPVariant,
+        arg4: &impl SEXPVariant,
+        arg5: &impl SEXPVariant,
         pc: &'a Pc,
     ) -> Result<&'a RObject, i32> {
         let expression = unsafe {
@@ -960,11 +1046,6 @@ impl RScalar {
             false
         }
     }
-}
-
-pub trait RScalarConstructor<T> {
-    #[allow(clippy::mut_from_ref)]
-    fn from_value(value: T, pc: &Pc) -> &mut Self;
 }
 
 macro_rules! r2scalar2 {
@@ -1218,12 +1299,6 @@ rconvertable!(RVector);
 rconvertable!(RMatrix);
 rconvertable!(RArray);
 
-pub trait RSliceable<T> {
-    fn slice(&self) -> &[T];
-
-    fn slice_mut(&mut self) -> &mut [T];
-}
-
 macro_rules! rsliceable {
     ($name:ident, $tipe:ty, $tipe2:ty, $ptr:expr) => {
         impl RSliceable<$tipe2> for $name<$tipe> {
@@ -1254,51 +1329,6 @@ rsliceable!(RArray, f64, f64, REAL);
 rsliceable!(RArray, i32, i32, INTEGER);
 rsliceable!(RArray, u8, u8, RAW);
 rsliceable!(RArray, bool, i32, LOGICAL);
-
-pub trait R2FromIterator2<T> {
-    #[allow(clippy::mut_from_ref)]
-    fn from_iter1<S>(iter: S, pc: &Pc) -> &mut Self
-    where
-        S: IntoIterator<Item = T> + ExactSizeIterator;
-
-    #[allow(clippy::mut_from_ref)]
-    fn from_iter2<'a, 'b, S>(iter: S, pc: &'a Pc) -> &'a mut Self
-    where
-        S: IntoIterator<Item = &'b T> + ExactSizeIterator,
-        T: 'b;
-}
-
-pub trait RGetSet0<T> {
-    /// Get the value at a certain index in an $tipe RVector.
-    fn get(&self) -> T;
-
-    /// Set the value at a certain index in an $tipe RVector.
-    fn set(&mut self, value: T);
-}
-
-pub trait RGetSet1<T> {
-    /// Get the value at a certain index in an $tipe RVector.
-    fn get(&self, index: usize) -> Result<T, &'static str>;
-
-    /// Set the value at a certain index in an $tipe RVector.
-    fn set(&mut self, index: usize, value: T) -> Result<(), &'static str>;
-}
-
-pub trait RGetSet2<T> {
-    /// Get the value at a certain index in an $tipe RVector.
-    fn get(&self, row: usize, col: usize) -> Result<T, &'static str>;
-
-    /// Set the value at a certain index in an $tipe RVector.
-    fn set(&mut self, row: usize, col: usize, value: T) -> Result<(), &'static str>;
-}
-
-pub trait RGetSetN<T> {
-    /// Get the value at a certain index in an $tipe RVector.
-    fn get(&self, index: &[usize]) -> Result<T, &'static str>;
-
-    /// Set the value at a certain index in an $tipe RVector.
-    fn set(&mut self, index: &[usize], value: T) -> Result<(), &'static str>;
-}
 
 macro_rules! r2scalar_getset2 {
     ($tipe:ty, $tipe2:ty, $get:expr, $set:expr) => {
@@ -1357,23 +1387,9 @@ impl RScalar<char> {
     }
 }
 
-pub trait RVectorConstructors<T> {
-    #[allow(clippy::mut_from_ref)]
-    fn new(length: usize, pc: &Pc) -> &mut Self;
-
-    #[allow(clippy::mut_from_ref)]
-    fn from_value(value: T, length: usize, pc: &Pc) -> &mut Self;
-
-    #[allow(clippy::mut_from_ref)]
-    fn from_array<const N: usize>(slice: [T; N], pc: &Pc) -> &mut Self;
-
-    #[allow(clippy::mut_from_ref)]
-    fn from_slice<'a>(slice: &[T], pc: &'a Pc) -> &'a mut Self;
-}
-
 macro_rules! r2vector2 {
     ($tipe:ty, $code:expr, $ptr:expr, $get:expr, $set:expr) => {
-        impl R2FromIterator2<$tipe> for RVector<$tipe> {
+        impl RFromIterator<$tipe> for RVector<$tipe> {
             fn from_iter1<T>(iter: T, pc: &Pc) -> &mut Self
             where
                 T: IntoIterator<Item = $tipe> + ExactSizeIterator,
@@ -1458,7 +1474,7 @@ r2vector2!(f64, REALSXP, REAL, REAL_ELT, SET_REAL_ELT);
 r2vector2!(i32, INTSXP, INTEGER, INTEGER_ELT, SET_INTEGER_ELT);
 r2vector2!(u8, RAWSXP, RAW, RAW_ELT, SET_RAW_ELT);
 
-impl R2FromIterator2<bool> for RVector<bool> {
+impl RFromIterator<bool> for RVector<bool> {
     fn from_iter1<T>(iter: T, pc: &Pc) -> &mut Self
     where
         T: IntoIterator<Item = bool> + ExactSizeIterator,
@@ -1636,14 +1652,6 @@ impl RVectorConstructors<&str> for RVector<char> {
     }
 }
 
-pub trait RMatrixConstructors<T> {
-    #[allow(clippy::mut_from_ref)]
-    fn new(nrow: usize, ncol: usize, pc: &Pc) -> &mut Self;
-
-    #[allow(clippy::mut_from_ref)]
-    fn from_value(value: T, nrow: usize, ncol: usize, pc: &Pc) -> &mut Self;
-}
-
 macro_rules! r2matrix2 {
     ($tipe:ty, $code:expr, $get:expr, $set:expr) => {
         impl RGetSet2<$tipe> for RMatrix<$tipe> {
@@ -1771,14 +1779,6 @@ impl<T> RMatrix<T> {
         }
         Ok(())
     }
-}
-
-pub trait RArrayConstructors<T> {
-    #[allow(clippy::mut_from_ref)]
-    fn new<'a>(dim: &[usize], pc: &'a Pc) -> &'a mut Self;
-
-    #[allow(clippy::mut_from_ref)]
-    fn from_value<'a>(value: T, dim: &[usize], pc: &'a Pc) -> &'a mut Self;
 }
 
 macro_rules! r2array2 {
@@ -1972,7 +1972,7 @@ macro_rules! rlistlike {
             pub fn set(
                 &mut self,
                 index: usize,
-                value: &impl IsRObject,
+                value: &impl SEXPVariant,
             ) -> Result<(), &'static str> {
                 if index < self.len() {
                     unsafe { SET_VECTOR_ELT(self.sexp(), index.try_into().unwrap(), value.sexp()) };
@@ -2067,7 +2067,7 @@ impl RExternalPtr {
     #[allow(clippy::mut_from_ref)]
     pub fn encode_full<'a, T>(
         x: T,
-        tag: &impl IsRObject,
+        tag: &impl SEXPVariant,
         managed_by_r: bool,
         pc: &'a Pc,
     ) -> &'a mut Self {
@@ -2194,7 +2194,7 @@ impl RExternalPtr {
 }
 
 // Conversions
-pub trait FromR<T: IsRObject, U> {
+pub trait FromR<T: SEXPVariant, U> {
     fn from_r(x: &T, pc: &Pc) -> Result<Self, U>
     where
         Self: Sized;
@@ -2231,19 +2231,19 @@ impl ToRScalar<i32> for usize {
 /// Trait for converting objects to RObjects.
 pub trait ToRObject2 {
     #[allow(clippy::mut_from_ref)]
-    fn to_r(self, pc: &Pc) -> &impl IsRObject;
+    fn to_r(self, pc: &Pc) -> &impl SEXPVariant;
 }
 
 /// Trait for converting objects to RObjects.
 pub trait ToRObject2Mut {
     #[allow(clippy::mut_from_ref)]
-    fn to_r(self, pc: &Pc) -> &mut impl IsRObject;
+    fn to_r(self, pc: &Pc) -> &mut impl SEXPVariant;
 }
 
 /// Trait for converting objects to RObjects.
 pub trait ToRObject2Mut2 {
     #[allow(clippy::mut_from_ref)]
-    fn to_r<'a>(&self, pc: &'a Pc) -> &'a mut impl IsRObject;
+    fn to_r<'a>(&self, pc: &'a Pc) -> &'a mut impl SEXPVariant;
 }
 
 /// Trait for converting objects to RObjects.
@@ -2307,20 +2307,20 @@ to_rvector24!(u8, u8);
 to_rvector24!(bool, bool);
 
 impl ToRObject2 for () {
-    fn to_r(self, pc: &Pc) -> &impl IsRObject {
+    fn to_r(self, pc: &Pc) -> &impl SEXPVariant {
         unsafe { R_NilValue.transmute_mut::<RObject, Pc>(pc) }
     }
 }
 
 impl ToRObject2 for SEXP {
     #[allow(clippy::not_unsafe_ptr_arg_deref)]
-    fn to_r(self, pc: &Pc) -> &impl IsRObject {
+    fn to_r(self, pc: &Pc) -> &impl SEXPVariant {
         unsafe { self.transmute::<RObject, Pc>(pc) }
     }
 }
 
-impl<T: IsRObject> ToRObject2 for &T {
-    fn to_r(self, pc: &Pc) -> &impl IsRObject {
+impl<T: SEXPVariant> ToRObject2 for &T {
+    fn to_r(self, pc: &Pc) -> &impl SEXPVariant {
         unsafe { self.sexp().transmute::<RObject, Pc>(pc) }
     }
 }
