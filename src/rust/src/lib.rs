@@ -1,7 +1,4 @@
-mod registration {
-    include!(concat!(env!("OUT_DIR"), "/registration.rs"));
-}
-
+roxido_registration!();
 use roxido::*;
 
 #[roxido]

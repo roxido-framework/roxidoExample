@@ -2369,6 +2369,15 @@ pub fn __private_print(x: &str, use_stdout: bool) -> bool {
     unsafe { R_ToplevelExec(Some(print_fn), y_ptr) == 0 }
 }
 
+#[macro_export]
+macro_rules! roxido_registration {
+    () => {
+        mod registration {
+            include!(concat!(env!("OUT_DIR"), "/registration.rs"));
+        }
+    };
+}
+
 /// Just like Rust's usual `print!` macro, except output goes to the R console.
 #[macro_export]
 macro_rules! rprint {
