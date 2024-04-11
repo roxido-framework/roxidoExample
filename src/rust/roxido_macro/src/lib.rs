@@ -142,9 +142,9 @@ fn roxido_fn(options: Vec<NestedMeta>, item_fn: syn::ItemFn) -> TokenStream {
                 };
                 let as_robject = |vec: &mut Vec<_>, mutable: bool| {
                     if mutable {
-                        vec.push(parse_quote! { let #name = #name.as_robject_mut(); });
+                        vec.push(parse_quote! { let #name = RObject::from_sexp_mut(#name, pc); });
                     } else {
-                        vec.push(parse_quote! { let #name = #name.as_robject(); });
+                        vec.push(parse_quote! { let #name = RObject::from_sexp(#name, pc); });
                     }
                 };
                 let as_rscalar = |vec: &mut Vec<_>, mutable: bool| {

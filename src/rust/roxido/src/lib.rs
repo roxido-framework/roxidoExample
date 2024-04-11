@@ -55,15 +55,6 @@ pub use roxido_macro::roxido;
 pub use rbindings::SEXP;
 
 pub trait SexpMethods {
-    fn as_robject(&self) -> &RObject;
-
-    #[allow(clippy::mut_from_ref)]
-    fn as_robject_mut(&self) -> &mut RObject;
-
-    fn as_str<'a>(&self) -> Result<&'a str, &'static str>;
-
-    fn from_str(x: &str, pc: &Pc) -> Self;
-
     /// # Safety
     /// Expert use only.
     unsafe fn transmute<T: IsRObject, A>(self, _anchor: &A) -> &T;
@@ -79,29 +70,6 @@ pub trait SexpMethods {
 }
 
 impl SexpMethods for SEXP {
-    fn as_robject(&self) -> &RObject {
-        unsafe { self.transmute(self) }
-    }
-
-    fn as_robject_mut(&self) -> &mut RObject {
-        unsafe { self.transmute_mut(self) }
-    }
-
-    fn as_str<'a>(&self) -> Result<&'a str, &'static str> {
-        let c_str = unsafe { CStr::from_ptr(R_CHAR(*self) as *const c_char) };
-        c_str.to_str().map_err(|_| "Not valid UTF8.")
-    }
-
-    fn from_str(x: &str, pc: &Pc) -> Self {
-        pc.protect(unsafe {
-            Rf_mkCharLenCE(
-                x.as_ptr() as *const c_char,
-                x.len().try_into().stop_str(TOO_LONG),
-                cetype_t_CE_UTF8,
-            )
-        })
-    }
-
     unsafe fn transmute<T, A>(self, _anchor: &A) -> &T {
         unsafe { &*self.cast::<T>() }
     }
@@ -200,6 +168,7 @@ baseline!(RDataFrame);
 baseline!(RFunction);
 baseline!(RExternalPtr);
 baseline!(RError);
+baseline!(RCharsxp);
 
 pub trait RHasLength: IsRObject {
     /// Returns the length of the RObject.
@@ -421,6 +390,17 @@ impl R {
 }
 
 impl RObject {
+    #[allow(clippy::not_unsafe_ptr_arg_deref)]
+    pub fn from_sexp<A>(sexp: SEXP, anchor: &A) -> &Self {
+        unsafe { sexp.transmute(anchor) }
+    }
+
+    #[allow(clippy::not_unsafe_ptr_arg_deref)]
+    #[allow(clippy::mut_from_ref)]
+    pub fn from_sexp_mut<A>(sexp: SEXP, anchor: &A) -> &mut Self {
+        unsafe { sexp.transmute_mut(anchor) }
+    }
+
     /// Returns the result of the is_null method, but as an Option value.
     pub fn as_option(&self) -> Option<&Self> {
         if self.is_null() {
@@ -661,7 +641,7 @@ impl RSymbol {
     /// Define a new symbol.
     #[allow(clippy::mut_from_ref)]
     pub fn new<'a>(x: &str, pc: &'a Pc) -> &'a mut Self {
-        unsafe { pc.protect_and_transmute(SEXP::from_str(x, pc)) }
+        unsafe { RCharsxp::new(x, pc).transmute_mut() }
     }
 
     /// Get R's "dim" symbol.
@@ -1348,14 +1328,32 @@ impl RGetSet0<bool> for RScalar<bool> {
     }
 }
 
+impl RCharsxp {
+    #[allow(clippy::mut_from_ref)]
+    fn new<'a>(x: &str, pc: &'a Pc) -> &'a mut Self {
+        unsafe {
+            pc.protect_and_transmute(Rf_mkCharLenCE(
+                x.as_ptr() as *const c_char,
+                x.len().try_into().stop_str(TOO_LONG),
+                cetype_t_CE_UTF8,
+            ))
+        }
+    }
+
+    fn as_str<'a>(&self) -> Result<&'a str, &'static str> {
+        let c_str = unsafe { CStr::from_ptr(R_CHAR(self.sexp()) as *const c_char) };
+        c_str.to_str().map_err(|_| "Not valid UTF8.")
+    }
+}
+
 impl RScalar<char> {
     pub fn get(&self) -> Result<&str, &'static str> {
-        let sexp = unsafe { STRING_ELT(self.sexp(), 0) };
-        sexp.as_str()
+        let x: &RCharsxp = unsafe { STRING_ELT(self.sexp(), 0).transmute(self) };
+        x.as_str()
     }
 
     pub fn set(&mut self, value: &str, pc: &Pc) {
-        unsafe { SET_STRING_ELT(self.sexp(), 0, SEXP::from_str(value, pc)) }
+        unsafe { SET_STRING_ELT(self.sexp(), 0, RCharsxp::new(value, pc).sexp()) }
     }
 }
 
