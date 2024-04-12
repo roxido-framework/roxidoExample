@@ -497,7 +497,48 @@ impl R {
     }
 }
 
+pub enum RObjectEnum<'a> {
+    RObject(&'a RObject),
+    RScalar(&'a RScalar),
+    RVector(&'a RVector),
+    RMatrix(&'a RMatrix),
+    RArray(&'a RArray),
+    RSymbol(&'a RSymbol),
+    RList(&'a RList),
+    RDataFrame(&'a RDataFrame),
+    RFunction(&'a RFunction),
+    RExternalPtr(&'a RExternalPtr),
+    RError(&'a RError),
+}
+
 impl RObject {
+    pub fn enumerate(&self) -> RObjectEnum {
+        if self.is_vector() {
+            let s: &RVector = unsafe { self.transmute() };
+            if s.is_scalar() {
+                RObjectEnum::RScalar(unsafe { s.transmute() })
+            } else {
+                RObjectEnum::RVector(s)
+            }
+        } else if self.is_matrix() {
+            RObjectEnum::RMatrix(unsafe { self.transmute() })
+        } else if self.is_array() {
+            RObjectEnum::RArray(unsafe { self.transmute() })
+        } else if self.is_symbol() {
+            RObjectEnum::RSymbol(unsafe { self.transmute() })
+        } else if self.is_list() {
+            RObjectEnum::RList(unsafe { self.transmute() })
+        } else if self.is_data_frame() {
+            RObjectEnum::RDataFrame(unsafe { self.transmute() })
+        } else if self.is_function() {
+            RObjectEnum::RFunction(unsafe { self.transmute() })
+        } else if self.is_external_ptr() {
+            RObjectEnum::RExternalPtr(unsafe { self.transmute() })
+        } else {
+            RObjectEnum::RObject(self)
+        }
+    }
+
     /// # Safety
     /// Expert use only.
     #[allow(clippy::not_unsafe_ptr_arg_deref)]
@@ -713,6 +754,10 @@ impl RObject {
         unsafe { Rf_isArray(self.sexp()) != 0 }
     }
 
+    pub fn is_symbol(&self) -> bool {
+        unsafe { TYPEOF(self.sexp()) == SYMSXP as i32 }
+    }
+
     pub fn is_list(&self) -> bool {
         unsafe { Rf_isVectorList(self.sexp()) != 0 }
     }
@@ -727,10 +772,6 @@ impl RObject {
 
     pub fn is_external_ptr(&self) -> bool {
         unsafe { TYPEOF(self.sexp()) == EXTPTRSXP as i32 }
-    }
-
-    pub fn is_symbol(&self) -> bool {
-        unsafe { TYPEOF(self.sexp()) == SYMSXP as i32 }
     }
 }
 

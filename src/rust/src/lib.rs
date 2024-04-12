@@ -1,6 +1,12 @@
 roxido_registration!();
 use roxido::*;
 
+// The function below and the associated comments give examples of using the
+// roxido framework. Delete these functions (and the associated R functions in
+// the 'R' directory of the package) as you see fit.
+
+// Roxido equivalent of the C 'convolve2' function from "Section 5.10.1
+// Calling .Call" in "Writing R Extensions".
 #[roxido]
 fn convolve2(a: &[f64], b: &[f64]) {
     let vec = RVector::from_value(0.0, a.len() + b.len() - 1, pc);
@@ -13,8 +19,16 @@ fn convolve2(a: &[f64], b: &[f64]) {
     vec
 }
 
+// The 'convolve2' function above took advantage of automatically-generated code
+// by the roxido macro. When R calls a native function, all arguments are passed
+// a SEXP type, which is a pointer to a structure with typedef SEXPREC. The
+// roxido macro will automatically declare types for arguments, as is the case
+// in the 'convolve2' function above. Of course, this automatic type declaration
+// is optional and the function below does this type declaration "by hand". The
+// use of the automatic type declaration is a no-cost abstraction since by-hand
+// type declaration is no more efficient that the automatically generated code.
 #[roxido]
-fn convolve2a(a: SEXP, b: SEXP) {
+fn convolve2_byhand(a: SEXP, b: SEXP) {
     let a = unsafe { RObject::from_sexp(a, pc) };
     let a = a.as_vector().stop_str("'a' is not a vector.");
     let a = a.as_f64().stop_str("'a' is not of storage mode 'double'.");
@@ -33,6 +47,117 @@ fn convolve2a(a: SEXP, b: SEXP) {
     vec.sexp()
 }
 
+// One can directly calls R's C API by directly accessing the 'rbindings'
+// module, but that does not take advantages of the ergonomics and safety of the
+// roxido framework.
+#[roxido]
+fn myrnorm(n: SEXP, mean: SEXP, sd: SEXP) {
+    unsafe {
+        use rbindings::*;
+        use std::convert::TryFrom;
+        let (mean, sd) = (Rf_asReal(mean), Rf_asReal(sd));
+        let len_i32 = Rf_asInteger(n);
+        let len_isize = isize::try_from(len_i32).unwrap();
+        let len_usize = usize::try_from(len_i32).unwrap();
+        let vec = Rf_protect(Rf_allocVector(REALSXP, len_isize));
+        let slice = std::slice::from_raw_parts_mut(REAL(vec), len_usize);
+        GetRNGstate();
+        for x in slice {
+            *x = Rf_rnorm(mean, sd);
+        }
+        PutRNGstate();
+        Rf_unprotect(1);
+        vec
+    }
+}
+
+// Regarding automatic type declaration, declaring 'a2: f64' causes the 'roxido'
+// macro to automatically emit code equivalent to the by-hand code below for
+// 'a1: SEXP'. Note that, if an argument cannot be viewed as the declared
+// type, the 'stop_str' method causes a R error to be thrown with a helpful
+// message about the variable name that was problematic. Also, note the use of
+// the 'rprintln!' macro, which is like Rust's builtin 'println!' macro except
+// output is guaranteed to go to R's console.
+#[roxido]
+fn automatic_type_declaration(a1: SEXP, a2: f64) {
+    let a1 = unsafe { RObject::from_sexp(a1, pc) };
+    let a1 = a1
+        .as_scalar()
+        .stop_str("\'a1\' is expected to be a scalar.");
+    let a1 = a1.f64();
+    rprintln!("{} and {} are the same value.", a1, a2);
+}
+
+// Automatic type declaration for "scalars" (i.e., R vectors of length one) are
+// available for f64 (R's double), i32 (R's integer), u8 (R's raw), bool (R's
+// logical), and &str (R's character). Again, R errors are always thrown with
+// helpful messages when type declarations do not match the actual arguments
+// passed to the function from R.
+#[roxido]
+fn automatic_type_declare_scalars(_a1: f64, _a2: i32, _a3: u8, _a4: bool, _a5: &str) {}
+
+// Automatic type declaration for slices are available for &[f64] (R's vector of
+// storage mode double), &[i32] (R's vector of storage mode integer), and &[u8]
+// (R's vector of storage mode raw).
+#[roxido]
+fn automatic_type_declare_slices(_a1: &[f64], _a2: &[i32], _a3: &[u8]) {}
+
+// Automatic type declarations for vectors are also available. Vectors can
+// optionally have element types, e.g., the argument 'a1' in the function below
+// must be a vector with storage mode double. In contrast, whereas 'a2' and
+// 'a3' must be vectors, any storage mode is acceptable for them. The storage
+// mode can later be asserted, as in the code below for 'a2'. And, regardless of
+// the storage mode, a vector can be declared to a desired storage mode, as in
+// the code below for 'a3'. In the 'to_f64' method, if the storage mode of 'a3'
+// is already double, no conversion or copying is performed. Otherwise, a new
+// vector of storage mode double is created and, since new memory is allocated,
+// a reference to a Pc struct is required. The Pc struct is a protection counter
+// that prevents R's garbage collector for reclaiming memory that is still in
+// use. The Pc struct and its methods are in lieu of 'PROTECT' and 'UNPROTECT'
+// macros that are used when programming against R's C API. A variable called
+// 'pc' is a reference to a Pc struct and is automatically made available in
+// every function with the 'roxido' attribute.
+#[roxido]
+fn automatic_type_declare_vectors(_a1: &RVector<f64>, a2: &RVector, a3: &RVector) {
+    let _a2 = a2
+        .as_f64()
+        .stop_str("\'_a1\' is expected to have storage mode double.");
+    let _a3 = a3.to_f64(pc);
+    rprintln!("a1 and a2 have the same value.");
+}
+
+// Automatic type declarations to matrices and arrays are also available.
+#[roxido]
+fn automatic_type_declare_matrix_and_array(_a1: &RMatrix<i32>, _a2: &RArray<u8>) {}
+
+// Lists are also supported.  Note the use of 0-based indexing.
+#[roxido]
+fn lists(a1: &RList) {
+    let _my_list = RList::with_names(&["first.name", "last.name", "age"], pc);
+    let first_element = a1.get(0).stop_str("The supplied list is empty.");
+    let name = a1.get_names().get(0).stop_str("Couldn't get name.");
+    rprintln!("The name of the first element is: {}", name);
+    match first_element.enumerate() {
+        RObjectEnum::RVector(x) => {
+            rprintln!("Got a vector of length {}!", x.len())
+        }
+        RObjectEnum::RMatrix(x) => {
+            rprintln!("Got a matrix with dimension {}-by-{}!", x.nrow(), x.ncol())
+        }
+        _ => {
+            rprintln!("Got something I didn't expect!")
+        }
+    }
+}
+
+// The function below finds a root of a univariate function supplied by the R
+// user and is inspired by the 'zero' function in "Section 5.11.1 Zero-finding"
+// of "Writing R Extensions". The body of functions with the 'roxido' attribute
+// are actually the body of closures. The return type of the closure can be
+// 'SEXP', 'RObject', or, indeed, anything for which an 'to_r' method is defined
+// and in scope. See the next function called 'create_r_objects_from_rust_types'
+// for a comprehensive list.  In the function below, the return type is 'f64'
+// and the 'to_r' is implicitly called after excuting the body.
 #[roxido]
 fn zero(f: &RFunction, guess1: f64, guess2: f64, tol: f64) {
     if !tol.is_finite() || tol <= 0.0 {
@@ -83,27 +208,7 @@ fn zero(f: &RFunction, guess1: f64, guess2: f64, tol: f64) {
     }
 }
 
-#[roxido]
-fn myrnorm(n: SEXP, mean: SEXP, sd: SEXP) {
-    unsafe {
-        use rbindings::*;
-        use std::convert::TryFrom;
-        let (mean, sd) = (Rf_asReal(mean), Rf_asReal(sd));
-        let len_i32 = Rf_asInteger(n);
-        let len_isize = isize::try_from(len_i32).unwrap();
-        let len_usize = usize::try_from(len_i32).unwrap();
-        let vec = Rf_protect(Rf_allocVector(REALSXP, len_isize));
-        let slice = std::slice::from_raw_parts_mut(REAL(vec), len_usize);
-        GetRNGstate();
-        for x in slice {
-            *x = Rf_rnorm(mean, sd);
-        }
-        PutRNGstate();
-        Rf_unprotect(1);
-        vec
-    }
-}
-
+// This shows how to create R objects from Rust types using the 'to_r' method.
 #[roxido]
 fn create_r_objects_from_rust_types() {
     // Scalars
