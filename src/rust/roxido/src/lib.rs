@@ -1729,7 +1729,10 @@ impl<T> RMatrix<T> {
 
     /// Manipulates the matrix in place to be a vector by dropping the `dim` attribute.
     pub fn to_vector_mut(&mut self) -> &mut RVector<T> {
-        unsafe { Rf_setAttrib(self.sexp(), R_DimSymbol, R_NilValue).transmute_mut(self) }
+        unsafe {
+            Rf_setAttrib(self.sexp(), R_DimSymbol, R_NilValue);
+            self.transmute_mut()
+        }
     }
 
     /// Get the index of a value based on the row and column number.
@@ -1834,7 +1837,10 @@ impl<T> RArray<T> {
 
     /// Manipulates the matrix in place to be a vector by dropping the `dim` attribute.
     pub fn to_vector_mut(&mut self) -> &mut RVector<T> {
-        unsafe { Rf_setAttrib(self.sexp(), R_DimSymbol, R_NilValue).transmute_mut(self) }
+        unsafe {
+            Rf_setAttrib(self.sexp(), R_DimSymbol, R_NilValue);
+            self.transmute_mut()
+        }
     }
 
     /// Get the index of a value based on the row and column number.
