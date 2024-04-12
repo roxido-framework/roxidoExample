@@ -57,7 +57,6 @@ use rbindings::*;
 use std::collections::HashMap;
 use std::ffi::{c_char, c_void, CStr, CString, NulError};
 use std::marker::PhantomData;
-use std::str::FromStr;
 
 trait SEXPMethods {
     /// # Safety
@@ -91,6 +90,14 @@ impl SEXPMethods for SEXP {
 pub trait RObjectVariant: Sized {
     fn sexp(&self) -> SEXP {
         self as *const Self as SEXP
+    }
+
+    fn as_robject(&self) -> &RObject {
+        unsafe { self.transmute() }
+    }
+
+    fn as_robject_mut(&mut self) -> &mut RObject {
+        unsafe { self.transmute_mut() }
     }
 
     /// # Safety
@@ -742,19 +749,15 @@ impl RError {
     }
 }
 
-impl FromStr for &RSymbol {
-    type Err = NulError;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        CString::new(s).map(|cstr| unsafe { Rf_install(cstr.as_ptr()).transmute_static() })
-    }
-}
-
 impl RSymbol {
     /// Define a new symbol.
     pub fn new(x: &CStr) -> &'static Self {
         // Doesn't need protection because R's garbage collection does not collect symbols.
         unsafe { Rf_install(x.as_ptr()).transmute_static() }
+    }
+
+    pub fn from(s: &str) -> Result<&Self, NulError> {
+        CString::new(s).map(|cstr| unsafe { Rf_install(cstr.as_ptr()).transmute_static() })
     }
 
     /// Get R's "dim" symbol.
