@@ -103,3 +103,64 @@ fn myrnorm(n: SEXP, mean: SEXP, sd: SEXP) {
         vec
     }
 }
+
+#[roxido]
+fn create_r_objects_from_rust_types() {
+    // Scalars
+    let _x = 0.0.to_r(pc);
+    let _x = 0.to_r(pc);
+    let _x = 0_u8.to_r(pc);
+    let _x = false.to_r(pc);
+    let _x = "A".to_r(pc);
+    let _x = (String::from("A")).to_r(pc);
+    // Arrays to be used later
+    let array_f64 = [0.0, 1.0];
+    let array_i32 = [0, 1];
+    let array_u8 = [0_u8, 1];
+    let array_bool = [false, true];
+    let array_str = ["A", "B"];
+    // Array
+    let _x = array_f64.to_r(pc);
+    let _x = array_i32.to_r(pc);
+    let _x = array_u8.to_r(pc);
+    let _x = array_bool.to_r(pc);
+    let _x = array_str.to_r(pc);
+    // Reference to array
+    let _x = (&array_f64).to_r(pc);
+    let _x = (&array_i32).to_r(pc);
+    let _x = (&array_u8).to_r(pc);
+    let _x = (&array_bool).to_r(pc);
+    let _x = (&array_str).to_r(pc);
+    // (Reference to a) Slice
+    let _x = (&array_f64[..]).to_r(pc);
+    let _x = (&array_i32[..]).to_r(pc);
+    let _x = (&array_u8[..]).to_r(pc);
+    let _x = (&array_bool[..]).to_r(pc);
+    let _x = (&array_str[..]).to_r(pc);
+    // Iterator
+    let _x = array_f64.iter().to_r(pc);
+    let _x = array_i32.iter().to_r(pc);
+    let _x = array_u8.iter().to_r(pc);
+    let _x = array_bool.iter().to_r(pc);
+    // IntoIterator
+    let _x = array_f64.into_iter().to_r(pc);
+    let _x = array_i32.into_iter().to_r(pc);
+    let _x = array_u8.into_iter().to_r(pc);
+    let _x = array_bool.into_iter().to_r(pc);
+    // Map from iterator
+    let _x = array_f64.iter().map(|x| 2.0 * x).to_r(pc);
+    let _x = array_i32.iter().map(|x| 2 * x).to_r(pc);
+    let _x = array_u8.iter().map(|x| 2 * x).to_r(pc);
+    let _x = array_bool.iter().map(|x| !x).to_r(pc);
+    // Map from into_iterator
+    let _x = array_f64.into_iter().map(|x| 2.0 * x).to_r(pc);
+    let _x = array_i32.into_iter().map(|x| 2 * x).to_r(pc);
+    let _x = array_u8.into_iter().map(|x| 2 * x).to_r(pc);
+    let _x = array_bool.into_iter().map(|x| !x).to_r(pc);
+    // Unit type
+    let _x = ().to_r(pc);
+    // SEXP
+    let _x = R::null().sexp().to_r(pc);
+    // T: RObjectVariant
+    let _x = 0_i32.to_r(pc).to_r(pc);
+}

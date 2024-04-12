@@ -2189,6 +2189,11 @@ pub trait FromR<T: RObjectVariant, U> {
         Self: Sized;
 }
 
+pub trait ToR<T: RObjectVariant> {
+    #[allow(clippy::mut_from_ref)]
+    fn to_r(self, pc: &Pc) -> &mut T;
+}
+
 pub trait ToR1<T: RObjectVariant> {
     #[allow(clippy::mut_from_ref)]
     fn to_r(self, pc: &Pc) -> &mut T;
@@ -2199,30 +2204,25 @@ pub trait ToR2<T: RObjectVariant> {
     fn to_r(self, pc: &Pc) -> &mut T;
 }
 
-pub trait ToR3<T: RObjectVariant> {
+pub trait ToRNoMut<T: RObjectVariant> {
     #[allow(clippy::mut_from_ref)]
     fn to_r(self, pc: &Pc) -> &T;
 }
 
-pub trait ToR4<T: RObjectVariant> {
-    #[allow(clippy::mut_from_ref)]
-    fn to_r<'a>(&self, pc: &'a Pc) -> &'a mut T;
-}
-
-impl ToR3<RObject> for () {
+impl ToRNoMut<RObject> for () {
     fn to_r(self, pc: &Pc) -> &RObject {
         unsafe { R_NilValue.transmute_mut::<RObject, Pc>(pc) }
     }
 }
 
-impl ToR3<RObject> for SEXP {
+impl ToRNoMut<RObject> for SEXP {
     #[allow(clippy::not_unsafe_ptr_arg_deref)]
     fn to_r(self, pc: &Pc) -> &RObject {
         unsafe { self.transmute::<RObject, Pc>(pc) }
     }
 }
 
-impl<T: RObjectVariant> ToR3<RObject> for &T {
+impl<T: RObjectVariant> ToRNoMut<RObject> for &T {
     fn to_r(self, pc: &Pc) -> &RObject {
         unsafe { self.sexp().transmute::<RObject, Pc>(pc) }
     }
@@ -2230,7 +2230,7 @@ impl<T: RObjectVariant> ToR3<RObject> for &T {
 
 macro_rules! to_rscalar {
     ($tipe:ty, $tipe2:ty) => {
-        impl<'a> ToR1<RScalar<$tipe>> for $tipe2 {
+        impl<'a> ToR<RScalar<$tipe>> for $tipe2 {
             fn to_r(self, pc: &Pc) -> &mut RScalar<$tipe> {
                 RScalar::from_value(self, pc)
             }
@@ -2244,20 +2244,9 @@ to_rscalar!(u8, u8);
 to_rscalar!(bool, bool);
 to_rscalar!(char, &str);
 
-impl ToR1<RScalar<i32>> for usize {
-    fn to_r(self, pc: &Pc) -> &mut RScalar<i32> {
-        RScalar::from_value(self.try_into().stop_str(TOO_LONG), pc)
-    }
-}
-
 macro_rules! to_rvector {
     ($tipe:ty, $tipe2:ty) => {
-        impl<'a, const N: usize> ToR1<RVector<$tipe>> for [$tipe2; N] {
-            fn to_r(self, pc: &Pc) -> &mut RVector<$tipe> {
-                RVector::from_array(self, pc)
-            }
-        }
-        impl<'a> ToR1<RVector<$tipe>> for &[$tipe2] {
+        impl<'a> ToR<RVector<$tipe>> for &[$tipe2] {
             fn to_r(self, pc: &Pc) -> &mut RVector<$tipe> {
                 RVector::from_slice(self, pc)
             }
@@ -2273,16 +2262,13 @@ to_rvector!(char, &str);
 
 macro_rules! to_rvector_iter {
     ($tipe:ty, $tipe2:ty) => {
-        impl<'a, T: IntoIterator<Item = $tipe2> + ExactSizeIterator> ToR2<RVector<$tipe>> for T {
+        impl<'a, T: Iterator<Item = $tipe2> + ExactSizeIterator> ToR1<RVector<$tipe>> for T {
             fn to_r(self, pc: &Pc) -> &mut RVector<$tipe> {
                 RVector::from_iter1(self, pc)
             }
         }
-    };
-    ($tipe:ty, $tipe2:ty) => {
-        impl<'a, T: IntoIterator<Item = &'a $tipe2> + ExactSizeIterator> ToR1<RVector<$tipe>>
-            for T
-        {
+
+        impl<'a, T: Iterator<Item = &'a $tipe2> + ExactSizeIterator> ToR2<RVector<$tipe>> for T {
             fn to_r(self, pc: &Pc) -> &mut RVector<$tipe> {
                 RVector::from_iter2(self, pc)
             }
