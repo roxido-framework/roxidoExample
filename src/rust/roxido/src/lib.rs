@@ -2263,6 +2263,11 @@ pub trait ToR2<T: RObjectVariant> {
     fn to_r(self, pc: &Pc) -> &mut T;
 }
 
+pub trait ToRRef<T: RObjectVariant> {
+    #[allow(clippy::mut_from_ref)]
+    fn to_r<'a>(&self, pc: &'a Pc) -> &'a mut T;
+}
+
 pub trait ToRNoMut<T: RObjectVariant> {
     #[allow(clippy::mut_from_ref)]
     fn to_r(self, pc: &Pc) -> &T;
