@@ -55,8 +55,9 @@ pub use rbindings::SEXP;
 
 use rbindings::*;
 use std::collections::HashMap;
-use std::ffi::{c_char, c_void, CStr};
+use std::ffi::{c_char, c_void, CStr, CString, NulError};
 use std::marker::PhantomData;
+use std::str::FromStr;
 
 trait SEXPMethods {
     /// # Safety
@@ -741,11 +742,19 @@ impl RError {
     }
 }
 
+impl FromStr for &RSymbol {
+    type Err = NulError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        CString::new(s).map(|cstr| unsafe { Rf_install(cstr.as_ptr()).transmute_static() })
+    }
+}
+
 impl RSymbol {
     /// Define a new symbol.
-    #[allow(clippy::mut_from_ref)]
-    pub fn new<'a>(x: &str, pc: &'a Pc) -> &'a mut Self {
-        unsafe { charsxp_from_str(x).transmute_mut(pc) }
+    pub fn new(x: &CStr) -> &'static Self {
+        // Doesn't need protection because R's garbage collection does not collect symbols.
+        unsafe { Rf_install(x.as_ptr()).transmute_static() }
     }
 
     /// Get R's "dim" symbol.
