@@ -34,7 +34,7 @@ fn convolve2a(a: SEXP, b: SEXP) {
 }
 
 #[roxido]
-fn zero2(f: &RFunction, guess1: f64, guess2: f64, tol: f64) {
+fn zero(f: &RFunction, guess1: f64, guess2: f64, tol: f64) {
     if !tol.is_finite() || tol <= 0.0 {
         stop!("'tol' must be a strictly positive value.");
     }
