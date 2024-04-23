@@ -98,6 +98,7 @@ extern "C" fn R_init_{}_rust(info: *mut rbindings::DllInfo) {{
                     } else {
                         func_name
                     };
+                    let func_name_for_r = func_name.replace(':', "_");
                     let n_args = tidbits.len() - 1;
                     snippet.push_str(&format!(
                         r#"
@@ -107,7 +108,7 @@ extern "C" fn R_init_{}_rust(info: *mut rbindings::DllInfo) {{
         fun: unsafe {{ std::mem::transmute(crate::{} as *const u8) }},
         numArgs: {},
     }});"#,
-                        func_name, func_name, n_args
+                        func_name_for_r, func_name, n_args
                     ));
                 }
                 snippet.push_str(

@@ -12,5 +12,5 @@
 #' @examples
 #' myrnorm(10, 5, 4)
 myrnorm <- function(n, mean, sd) {
-  .Call(.myrnorm, n, mean, sd)
+  .Call(.dist__myrnorm, n, mean, sd)
 }

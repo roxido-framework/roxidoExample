@@ -1,3 +1,4 @@
+// The 'roxido_registration' macro is called at the start of the 'lib.rs' file.
 roxido_registration!();
 use roxido::*;
 
@@ -6,7 +7,9 @@ use roxido::*;
 // the 'R' directory of the package) as you see fit.
 
 // Roxido equivalent of the C 'convolve2' function from "Section 5.10.1
-// Calling .Call" in "Writing R Extensions".
+// Calling .Call" in "Writing R Extensions".  This function is automatically
+// registered when the package is installed and it can be executed from R using
+// '.Call(.convolve2, a, b)'.  Note the 'dot' in from of the function name.
 #[roxido]
 fn convolve2(a: &[f64], b: &[f64]) {
     let vec = RVector::from_value(0.0, a.len() + b.len() - 1, pc);
@@ -45,30 +48,6 @@ fn convolve2_byhand(a: SEXP, b: SEXP) {
         }
     }
     vec.sexp()
-}
-
-// One can directly calls R's C API by directly accessing the 'rbindings'
-// module, but that does not take advantages of the ergonomics and safety of the
-// roxido framework.
-#[roxido]
-fn myrnorm(n: SEXP, mean: SEXP, sd: SEXP) {
-    unsafe {
-        use rbindings::*;
-        use std::convert::TryFrom;
-        let (mean, sd) = (Rf_asReal(mean), Rf_asReal(sd));
-        let len_i32 = Rf_asInteger(n);
-        let len_isize = isize::try_from(len_i32).unwrap();
-        let len_usize = usize::try_from(len_i32).unwrap();
-        let vec = Rf_protect(Rf_allocVector(REALSXP, len_isize));
-        let slice = std::slice::from_raw_parts_mut(REAL(vec), len_usize);
-        GetRNGstate();
-        for x in slice {
-            *x = Rf_rnorm(mean, sd);
-        }
-        PutRNGstate();
-        Rf_unprotect(1);
-        vec
-    }
 }
 
 // Regarding automatic type declaration, declaring 'a2: f64' causes the 'roxido'
@@ -269,3 +248,7 @@ fn create_r_objects_from_rust_types() {
     // T: RObjectVariant
     let _x = 0_i32.to_r(pc).to_r(pc);
 }
+
+// Note that roxido functions can be in modules, e.g., the 'myrnorm' function in
+// the 'dist' module.
+mod dist;

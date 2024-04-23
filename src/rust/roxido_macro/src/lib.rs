@@ -74,6 +74,7 @@ fn roxido_fn(options: Vec<NestedMeta>, item_fn: syn::ItemFn) -> TokenStream {
     };
     let mut longjmp = true;
     let mut invisible = false;
+    let mut module = String::new();
     for meta in options {
         let meta = meta.0;
         let meta_string = quote!(#meta).to_string();
@@ -98,6 +99,9 @@ fn roxido_fn(options: Vec<NestedMeta>, item_fn: syn::ItemFn) -> TokenStream {
                             panic!("Unsupported value '{value_string}' for {name_string}.")
                         }
                     },
+                    "module" => {
+                        module = value_string;
+                    }
                     _ => panic!("Unsupported option '{name_string}'."),
                 }
             }
@@ -436,6 +440,10 @@ fn roxido_fn(options: Vec<NestedMeta>, item_fn: syn::ItemFn) -> TokenStream {
                 let filename = "roxido.txt";
                 if let Ok(mut file) = OpenOptions::new().append(true).create(true).open(filename) {
                     let mut line = String::new();
+                    if !module.is_empty() {
+                        line.push_str(module.as_str());
+                        line.push_str("::");
+                    }
                     line.push_str(&func_name);
                     for arg in arg_names.iter() {
                         line.push_str(", ");
@@ -460,7 +468,7 @@ fn roxido_fn(options: Vec<NestedMeta>, item_fn: syn::ItemFn) -> TokenStream {
         TokenStream::from(quote! {
             #[allow(clippy::useless_transmute)]
             #[no_mangle]
-            extern "C" fn #name(#new_args) -> SEXP {
+            pub extern "C" fn #name(#new_args) -> SEXP {
                 let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                     let pc = &mut Pc::__private_new();
                     #( #generated_statements )*
@@ -499,7 +507,7 @@ fn roxido_fn(options: Vec<NestedMeta>, item_fn: syn::ItemFn) -> TokenStream {
         TokenStream::from(quote! {
             #[allow(clippy::useless_transmute)]
             #[no_mangle]
-            extern "C" fn #name(#new_args) -> SEXP {
+            pub extern "C" fn #name(#new_args) -> SEXP {
                 let result: Result<SEXP, _> = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                     let pc = &mut Pc::__private_new();
                     #( #generated_statements )*
