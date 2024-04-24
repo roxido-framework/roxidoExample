@@ -18,8 +18,8 @@ delete-release tag:
   git tag -d {{tag}}
 
 new-release:
-  -git push --delete origin latest
-  -git tag -d latest
-  git tag latest
+  -just delete-release `date +"v%y.%m.%d"`
+  -just delete-release latest
   git tag `date +"v%y.%m.%d"`
+  git tag latest
   git push --tags
