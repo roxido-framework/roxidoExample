@@ -1,7 +1,7 @@
 use roxido::*;
 
 // This is an example of a roxido function in a module.  Note that, for
-// a 'roxido' function in a module, the 'module token must be set to the
+// a 'roxido' function in a module, the 'module' token must be set to the
 // module name.  The function is then executed from R with, for example,
 // '.Call(.dist__myrnorm, n, mean, sd)'.  This example also illustrates
 // that, whereas one can directly calls R's C API by directly accessing the

@@ -102,10 +102,10 @@ fn roxido_fn(options: Vec<NestedMeta>, item_fn: syn::ItemFn) -> TokenStream {
                     "module" => {
                         module = value_string;
                     }
-                    _ => panic!("Unsupported option '{name_string}'."),
+                    _ => panic!("Unsupported token '{name_string}'."),
                 }
             }
-            _ => panic!("Unsupported option '{meta_string}'."),
+            _ => panic!("Unsupported token '{meta_string}'."),
         }
     }
     let name = item_fn.sig.ident;
