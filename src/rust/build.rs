@@ -55,8 +55,9 @@ fn make_registration_code(src_path: &Path) -> Option<String> {
                 buffer.clear();
                 buffer.push_str("# Automatically regenerated. Do not edit.\n\n");
                 for &line in functions_info.iter() {
+                    let line_for_r = line.replace(':', "_");
                     buffer.push_str("# .Call(.");
-                    buffer.push_str(line);
+                    buffer.push_str(&line_for_r);
                     buffer.push_str(")\n");
                 }
                 buffer.push_str(
