@@ -47,7 +47,7 @@ fn convolve2_byhand(a: SEXP, b: SEXP) {
             ab[i + j] += ai * bj;
         }
     }
-    vec.sexp()
+    vec
 }
 
 // Regarding automatic type declaration, declaring 'a2: f64' causes the 'roxido'
