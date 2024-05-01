@@ -2081,11 +2081,11 @@ macro_rules! rlistlike {
                 Err(format!("Could not find '{}' in the list.", key.as_ref()))
             }
 
-            /// Convert the list into an [RListMap]
+            /// Convert the list into an [R2ListMap2]
             ///
             /// This allows Rust HashMap methods to be used on the contents
             /// of the list, while still retaining the original list within
-            /// the RListMap struct in the robj field.
+            /// the R2ListMap2 struct in the robj field.
             pub fn make_map(&self) -> R2ListMap2 {
                 let mut map = HashMap::new();
                 let names = self.get_names();
@@ -2129,7 +2129,7 @@ impl RExternalPtr {
     /// Move Rust object to an R external pointer.
     ///
     /// This *method* moves a Rust object to an R external pointer and then, as far as Rust is concerned, leaks the memory.
-    /// Thus the programmer is then responsible to release the memory by calling [`RObject::decode_val`].
+    /// Thus the programmer is then responsible to release the memory by calling [`RExternalPtr::decode_val`].
     ///
     #[allow(clippy::mut_from_ref)]
     pub fn encode<'a, T>(x: T, tag: &str, pc: &'a Pc) -> &'a mut Self {
@@ -2139,7 +2139,7 @@ impl RExternalPtr {
     /// Move Rust object to an R external pointer.
     ///
     /// This *method* moves a Rust object to an R external pointer and then, as far as Rust is concerned, leaks the memory.
-    /// Thus the programmer is then responsible to release the memory by calling [`RObject::decode_val`].
+    /// Thus the programmer is then responsible to release the memory by calling [`RExternalPtr::decode_val`].
     ///
     #[allow(clippy::mut_from_ref)]
     pub fn encode_full<'a, T>(
@@ -2263,7 +2263,7 @@ impl RExternalPtr {
 
     /// Get tag for an R external pointer.
     ///
-    /// This method gets the tag associated with an R external pointer, which was set by [`Self::as_external_ptr`].
+    /// This method gets the tag associated with an R external pointer, which was set by [`RObject::as_external_ptr`].
     ///
     pub fn tag(&self) -> &RObject {
         unsafe { R_ExternalPtrTag(self.sexp()).transmute(self) }
