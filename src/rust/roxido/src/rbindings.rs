@@ -1,4 +1,4 @@
-//! Automatically Generated Bindings for R's C API.
+//! Automatically generated bindings for R's C API.
 #![allow(improper_ctypes)]
 #![allow(non_camel_case_types)]
 #![allow(non_snake_case)]
@@ -15,15 +15,15 @@ pub struct __BindgenComplex<T> {
     pub re: T,
     pub im: T,
 }
-pub const R_VERSION: u32 = 262915;
-pub const R_NICK: &[u8; 16] = b"Angel Food Cake\0";
+pub const R_VERSION: u32 = 263168;
+pub const R_NICK: &[u8; 10] = b"Puppy Cup\0";
 pub const R_MAJOR: &[u8; 2] = b"4\0";
-pub const R_MINOR: &[u8; 4] = b"3.3\0";
+pub const R_MINOR: &[u8; 4] = b"4.0\0";
 pub const R_STATUS: &[u8; 1] = b"\0";
 pub const R_YEAR: &[u8; 5] = b"2024\0";
-pub const R_MONTH: &[u8; 3] = b"02\0";
-pub const R_DAY: &[u8; 3] = b"29\0";
-pub const R_SVN_REVISION: u32 = 86002;
+pub const R_MONTH: &[u8; 3] = b"04\0";
+pub const R_DAY: &[u8; 3] = b"24\0";
+pub const R_SVN_REVISION: u32 = 86474;
 pub const __STDC_WANT_IEC_60559_FUNCS_EXT__: u32 = 1;
 pub const _FEATURES_H: u32 = 1;
 pub const _DEFAULT_SOURCE: u32 = 1;
@@ -301,6 +301,7 @@ pub const RE_DUP_MAX: u32 = 32767;
 pub const SINGLESXP: u32 = 302;
 pub const R_XLEN_T_MAX: u64 = 4503599627370496;
 pub const R_SHORT_LEN_MAX: u32 = 2147483647;
+pub const R_PRIdXLEN_T: &[u8; 3] = b"td\0";
 pub const NILSXP: u32 = 0;
 pub const SYMSXP: u32 = 1;
 pub const LISTSXP: u32 = 2;
@@ -324,6 +325,7 @@ pub const BCODESXP: u32 = 21;
 pub const EXTPTRSXP: u32 = 22;
 pub const WEAKREFSXP: u32 = 23;
 pub const RAWSXP: u32 = 24;
+pub const OBJSXP: u32 = 25;
 pub const S4SXP: u32 = 25;
 pub const NEWSXP: u32 = 30;
 pub const FREESXP: u32 = 31;
@@ -343,7 +345,7 @@ pub const IDENT_USE_SRCREF: u32 = 32;
 pub const IDENT_EXTPTR_AS_REF: u32 = 64;
 pub const HT_TYPE_IDENTICAL: u32 = 0;
 pub const HT_TYPE_ADDRESS: u32 = 1;
-pub const R_VERSION_STRING: &[u8; 6] = b"4.3.3\0";
+pub const R_VERSION_STRING: &[u8; 6] = b"4.4.0\0";
 pub const HAVE_EXPM1: u32 = 1;
 pub const HAVE_HYPOT: u32 = 1;
 pub const HAVE_LOG1P: u32 = 1;
@@ -4817,6 +4819,18 @@ fn bindgen_test_layout_Rcomplex() {
     );
 }
 extern "C" {
+    pub fn Rprintf(arg1: *const ::std::os::raw::c_char, ...);
+}
+extern "C" {
+    pub fn REprintf(arg1: *const ::std::os::raw::c_char, ...);
+}
+extern "C" {
+    pub fn Rvprintf(arg1: *const ::std::os::raw::c_char, arg2: *mut __va_list_tag);
+}
+extern "C" {
+    pub fn REvprintf(arg1: *const ::std::os::raw::c_char, arg2: *mut __va_list_tag);
+}
+extern "C" {
     pub fn Rf_error(arg1: *const ::std::os::raw::c_char, ...);
 }
 extern "C" {
@@ -4917,18 +4931,6 @@ extern "C" {
         arg1: *mut ::std::os::raw::c_void,
         arg2: usize,
     ) -> *mut ::std::os::raw::c_void;
-}
-extern "C" {
-    pub fn Rprintf(arg1: *const ::std::os::raw::c_char, ...);
-}
-extern "C" {
-    pub fn REprintf(arg1: *const ::std::os::raw::c_char, ...);
-}
-extern "C" {
-    pub fn Rvprintf(arg1: *const ::std::os::raw::c_char, arg2: *mut __va_list_tag);
-}
-extern "C" {
-    pub fn REvprintf(arg1: *const ::std::os::raw::c_char, arg2: *mut __va_list_tag);
 }
 pub const RNGtype_WICHMANN_HILL: RNGtype = 0;
 pub const RNGtype_MARSAGLIA_MULTICARRY: RNGtype = 1;
@@ -6287,9 +6289,6 @@ extern "C" {
     pub fn Rf_any_duplicated3(x: SEXP, incomp: SEXP, from_last: Rboolean) -> R_xlen_t;
 }
 extern "C" {
-    pub fn Rf_applyClosure(arg1: SEXP, arg2: SEXP, arg3: SEXP, arg4: SEXP, arg5: SEXP) -> SEXP;
-}
-extern "C" {
     pub fn Rf_classgets(arg1: SEXP, arg2: SEXP) -> SEXP;
 }
 extern "C" {
@@ -6413,6 +6412,9 @@ extern "C" {
     pub fn Rf_isUnsorted(arg1: SEXP, arg2: Rboolean) -> Rboolean;
 }
 extern "C" {
+    pub fn R_isTRUE(arg1: SEXP) -> Rboolean;
+}
+extern "C" {
     pub fn Rf_lengthgets(arg1: SEXP, arg2: R_len_t) -> SEXP;
 }
 extern "C" {
@@ -6496,6 +6498,9 @@ extern "C" {
 }
 extern "C" {
     pub fn Rf_type2char(arg1: SEXPTYPE) -> *const ::std::os::raw::c_char;
+}
+extern "C" {
+    pub fn R_typeToChar(arg1: SEXP) -> *const ::std::os::raw::c_char;
 }
 extern "C" {
     pub fn Rf_type2rstr(arg1: SEXPTYPE) -> SEXP;
@@ -7801,10 +7806,13 @@ extern "C" {
     pub fn Rf_lgamma1p(arg1: f64) -> f64;
 }
 extern "C" {
-    pub fn Rf_logspace_add(arg1: f64, arg2: f64) -> f64;
+    pub fn Rf_pow1p(arg1: f64, arg2: f64) -> f64;
 }
 extern "C" {
-    pub fn Rf_logspace_sub(arg1: f64, arg2: f64) -> f64;
+    pub fn Rf_logspace_add(logx: f64, logy: f64) -> f64;
+}
+extern "C" {
+    pub fn Rf_logspace_sub(logx: f64, logy: f64) -> f64;
 }
 extern "C" {
     pub fn Rf_logspace_sum(arg1: *const f64, arg2: ::std::os::raw::c_int) -> f64;
