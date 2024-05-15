@@ -2409,30 +2409,37 @@ to_rvector_iter!(bool, bool);
 /// See the `Rvprintf` function in `printutils.c` of R's source.
 ///
 #[doc(hidden)]
-pub fn __private_print(x: &str, use_stdout: bool) -> bool {
+pub fn __private_print(x: &str, newline: bool, use_stdout: bool) -> bool {
     #[repr(C)]
     struct DummyFat {
         len: usize,
         ptr: *const c_char,
+        newline: bool,
         use_stdout: bool,
     }
     let mut y = DummyFat {
         len: x.len(),
         ptr: x.as_ptr() as *const c_char,
+        newline,
         use_stdout,
     };
     let y_ptr = &mut y as *mut DummyFat as *mut c_void;
     extern "C" fn print_fn(y_ptr: *mut c_void) {
         unsafe {
             let y_ptr = y_ptr as *mut DummyFat;
-            if (*y_ptr).use_stdout {
-                Rprintf(
-                    b"%.*s\0".as_ptr() as *const c_char,
+            let f = if (*y_ptr).use_stdout {
+                Rprintf
+            } else {
+                REprintf
+            };
+            if (*y_ptr).newline {
+                f(
+                    b"%.*s\n\0".as_ptr() as *const c_char,
                     (*y_ptr).len,
                     (*y_ptr).ptr,
                 );
             } else {
-                REprintf(
+                f(
                     b"%.*s\0".as_ptr() as *const c_char,
                     (*y_ptr).len,
                     (*y_ptr).ptr,
@@ -2465,10 +2472,10 @@ macro_rules! roxido_registration {
 #[macro_export]
 macro_rules! rprint {
     ($fmt_string:expr) => {
-        __private_print(format!($fmt_string).as_str(), true)
+        __private_print(format!($fmt_string).as_str(), false, true)
     };
     ($fmt_string:expr, $( $arg:expr ),* ) => {
-        __private_print(format!($fmt_string, $($arg),*).as_str(), true)
+        __private_print(format!($fmt_string, $($arg),*).as_str(), false, true)
     }
 }
 
@@ -2476,13 +2483,13 @@ macro_rules! rprint {
 #[macro_export]
 macro_rules! rprintln {
     () => {
-        __private_print("\n", true)
+        __private_print("", true, true)
     };
     ($fmt_string:expr) => {
-        __private_print(format!(concat!($fmt_string,"\n")).as_str(), true)
+        __private_print(format!($fmt_string).as_str(), true, true)
     };
     ($fmt_string:expr, $( $arg:expr ),* ) => {
-        __private_print(format!(concat!($fmt_string,"\n"), $($arg),*).as_str(), true)
+        __private_print(format!($fmt_string, $($arg),*).as_str(), true, true)
     }
 }
 
@@ -2490,10 +2497,10 @@ macro_rules! rprintln {
 #[macro_export]
 macro_rules! reprint {
     ($fmt_string:expr) => {
-        __private_print(format!($fmt_string).as_str(), false)
+        __private_print(format!($fmt_string).as_str(), false, false)
     };
     ($fmt_string:expr, $( $arg:expr ),* ) => {
-        __private_print(format!($fmt_string, $($arg),*).as_str(), false)
+        __private_print(format!($fmt_string, $($arg),*).as_str(), false, false)
     }
 }
 
@@ -2504,10 +2511,10 @@ macro_rules! reprintln {
         __private_print("\n", false)
     };
     ($fmt_string:expr) => {
-        __private_print(format!(concat!($fmt_string,"\n")).as_str(), false)
+        __private_print(format!($fmt_string).as_str(), true, false)
     };
     ($fmt_string:expr, $( $arg:expr ),* ) => {
-        __private_print(format!(concat!($fmt_string,"\n"), $($arg),*).as_str(), false)
+        __private_print(format!($fmt_string, $($arg),*).as_str(), true, false)
     }
 }
 
