@@ -2,9 +2,10 @@
 name = "roxido_faer"
 version = "0.1.0"
 edition = "2021"
+rust-version = "1.67.1"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
 roxido = { path = "../roxido" }
-faer = "0.17"
+faer = "0.19"
