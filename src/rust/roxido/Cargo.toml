@@ -8,7 +8,7 @@ homepage = "https://github.com/dbdahl/cargo-framework"
 readme = "README.md"
 license = "MIT OR Apache-2.0"
 publish = false
-rust-version = "1.65"
+rust-version = "1.67.1"
 
 [dependencies]
 roxido_macro = { path="../roxido_macro" }

@@ -8,4 +8,4 @@ rust-version = "1.67.1"
 
 [dependencies]
 roxido = { path = "../roxido" }
-faer = "0.19"
+faer = "0.21"

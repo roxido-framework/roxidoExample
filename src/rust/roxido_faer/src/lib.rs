@@ -10,7 +10,7 @@ impl RMatrix2Faer for &RMatrix<f64> {
         Ok({
             let nrow = self.nrow();
             unsafe {
-                faer::mat::from_raw_parts(
+                MatRef::from_raw_parts(
                     self.slice().as_ptr(),
                     nrow,
                     self.ncol(),
@@ -33,7 +33,7 @@ impl<'a> ToR<RMatrix<f64>> for MatRef<'a, f64> {
         let nc = self.ncols();
         let result = RMatrix::<f64>::new(nr, nc, pc);
         for (k, r) in result.slice_mut().iter_mut().enumerate() {
-            *r = self.read(k % nr, k / nc);
+            *r = *self.get(k % nr, k / nc);
         }
         result
     }
