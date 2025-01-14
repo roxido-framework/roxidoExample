@@ -109,7 +109,7 @@ if (cran_build) {
   assign("cargo_home", file.path(getwd(), ".cargo"), envir = cargo_home_env)
   Sys.setenv(CARGO_HOME = get("cargo_home", envir = cargo_home_env))
   reg.finalizer(cargo_home_env, function(x) {
-    cat("R process is ending. Finalizer function is called.\n")
+    message("Deleting temporary CARGO_HOME directory.")
     unlink(get("cargo_home", envir = cargo_home_env),
            recursive = TRUE, force = TRUE)
   }, onexit = TRUE)
