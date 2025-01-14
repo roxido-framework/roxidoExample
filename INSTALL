@@ -19,10 +19,11 @@ first method will guarantee that the most recent version is installed):
 
 OR
 
-2. Install from a package manager and let 'cargo' by found using the $PATH environment variable,
-   e.g.:
+2. Install from a package manager and let 'cargo' by found using the $PATH
+   environment variable, e.g.:
 
    Debian:  sudo apt install cargo
    Ubuntu:  sudo apt install cargo
    Fedora:  sudo dnf install cargo
    macOS:   brew install rust
+
