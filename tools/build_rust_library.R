@@ -76,7 +76,7 @@ if (!check_msrv()) {
 
 message("Found a suitable installation of cargo and rustc.")
 
-target <- {
+target_triple <- {
   if (sysname == "Linux") {
     if (arch == "aarch64") {
       "aarch64-unknown-linux-gnu"
@@ -128,7 +128,7 @@ for (run_counter in 1:2) {
   Sys.setenv(R_CARGO_RUN_COUNTER = run_counter)
   status <- system2("cargo",
                     c("build", offline_option, "--release",
-                      "--target", triple, jobs_option))
+                      "--target", target_triple, jobs_option))
   if (status != 0) {
     message("Error running Cargo.\n")
     message(paste0(readLines("../../INSTALL"), collapse = "\n"))
@@ -136,6 +136,6 @@ for (run_counter in 1:2) {
   }
 }
 
-file.copy(sprintf("target/%s/release/librust.a", triple),
+file.copy(sprintf("target/%s/release/librust.a", target_triple),
           "..", overwrite = TRUE)
 message("Built Rust static library.")
