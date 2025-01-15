@@ -63,7 +63,7 @@ if (!check_msrv()) {
   Sys.setenv(PATH = original_path)
   if (!check_msrv()) {
     message("Could not find a suitable installation of cargo and rustc.")
-    message(paste0(readLines("../../INSTALL"), collapse = "\n"))
+    message(paste0(readLines("INSTALL"), collapse = "\n"))
     stop("Exiting.")
   }
 }
