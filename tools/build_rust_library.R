@@ -58,7 +58,7 @@ check_msrv <- function() {
 
 original_path <- Sys.getenv("PATH")
 cargo_bin_dir <- if (sysname == "Windows") {
-  Sys.getenv("USERPROFILE")
+  normalizePath(file.path(Sys.getenv("USERPROFILE"), ".cargo", "bin"))
 } else {
   path.expand("~/.cargo/bin")
 }
