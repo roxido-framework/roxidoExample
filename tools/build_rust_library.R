@@ -1,3 +1,6 @@
+sysname <- Sys.info()[["sysname"]]
+arch <- R.version$arch
+
 dcf <- read.dcf("DESCRIPTION")
 
 system_requirements <- unname(dcf[, "SystemRequirements"])
@@ -54,23 +57,26 @@ check_msrv <- function() {
 }
 
 original_path <- Sys.getenv("PATH")
-expanded_path <- paste0(path.expand("~/.cargo/bin"), .Platform$path.sep,
-                        original_path)
-Sys.setenv(PATH = expanded_path)
+cargo_bin_dir <- if (sysname == "Windows") {
+  Sys.getenv("USERPROFILE")
+} else {
+  path.expand("~/.cargo/bin")
+}
+Sys.setenv(PATH = paste0(cargo_bin_dir, .Platform$path.sep, original_path))
 
 if (!check_msrv()) {
   message("Trying again with the original PATH variable.")
   Sys.setenv(PATH = original_path)
   if (!check_msrv()) {
     message("Could not find a suitable installation of cargo and rustc.")
-    message(paste0(readLines("../../INSTALL"), collapse = "\n"))
+    message(paste0(readLines("INSTALL"), collapse = "\n"))
     stop("Exiting.")
   }
 }
 
 message("Found a suitable installation of cargo and rustc.")
 
-target <- function(sysname = Sys.info()[["sysname"]], arch = R.version$arch) {
+target <- {
   if (sysname == "Linux") {
     if (arch == "aarch64") {
       "aarch64-unknown-linux-gnu"
@@ -117,8 +123,6 @@ if (cran_build) {
   offline_option <- NULL
   jobs_option <- NULL
 }
-
-triple <- target()
 
 for (run_counter in 1:2) {
   Sys.setenv(R_CARGO_RUN_COUNTER = run_counter)
