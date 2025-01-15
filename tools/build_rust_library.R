@@ -25,7 +25,7 @@ get_version <- function(what = c("cargo", "rustc")[1]) {
   if (is.null(version_string_full)) return(NULL)
   message(sprintf("'%s --version' reports: %s", what, version_string_full))
 
-  version_string <- gsub("^(cargo|rustc) ([^ ]+) .*$", "\\2",
+  version_string <- gsub("^(cargo|rustc)\\s*([^ ]+).*$", "\\2",
                          version_string_full)
   if (version_string == version_string_full) {
     message(sprintf("Could not determine %s version based on this output:",
