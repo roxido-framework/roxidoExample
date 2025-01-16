@@ -135,6 +135,7 @@ for (run_counter in 1:2) {
     stop("Exiting.")
   }
 }
+unlink("roxido.txt")
 
 file.copy(sprintf("target/%s/release/librust.a", target_triple),
           "..", overwrite = TRUE)
