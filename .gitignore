@@ -4,7 +4,6 @@
 /.RData
 /.Ruserdata
 /R/roxido.R
-/src/shim.c
 /src/shim.o
 /src/dummy.o
 /src/*.a
