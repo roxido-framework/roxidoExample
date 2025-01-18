@@ -4,6 +4,7 @@ authors-scratch.txt
 ^src/librust.a
 ^src/rust/(.*/)*target
 ^src/rust/vendor/
+^src/rust/roxido/src/rbindings.rs$
 ^src/rust/[.]cargo
 ^src/rust/(.*/)*[.]idea
 ^.*\.Rproj$

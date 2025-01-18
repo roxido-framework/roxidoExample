@@ -1,3 +1,4 @@
+src/rbindings.rs
 debug/
 target/
 **/*.rs.bk

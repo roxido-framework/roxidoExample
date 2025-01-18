@@ -10,5 +10,8 @@ license = "MIT OR Apache-2.0"
 publish = false
 rust-version = "1.67.1"
 
+[build-dependencies]
+bindgen = "0.71"
+
 [dependencies]
 roxido_macro = { path="../roxido_macro" }
