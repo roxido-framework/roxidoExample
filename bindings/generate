@@ -33,7 +33,7 @@ then
   rm -rf "$SRC_DIR"
   tar xf "$SRC_TARBALL"
   cd "$SRC_DIR"
-  ./configure --disable-java
+  ./configure --disable-java --without-recommended-packages
   make
 else
   echo "##"
@@ -61,3 +61,4 @@ cargo install bindgen-cli
 # Make sure that "clang" (A C language family front-end for LLVM) is installed.
 bindgen $CWD/wrapper.h --blocklist-item FP_NAN --blocklist-item FP_INFINITE --blocklist-item FP_ZERO --blocklist-item FP_SUBNORMAL --blocklist-item FP_NORMAL -- -I. >> $DEST
 
+echo "The file '$DEST' should have been updated."
