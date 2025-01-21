@@ -467,6 +467,7 @@ fn roxido_fn(options: Vec<NestedMeta>, item_fn: syn::ItemFn) -> TokenStream {
         // leaks.  See https://docs.rs/crate/setjmp for background information.
         TokenStream::from(quote! {
             #[allow(clippy::useless_transmute)]
+            #[allow(clippy::not_unsafe_ptr_arg_deref)]
             #[no_mangle]
             pub extern "C" fn #name(#new_args) -> SEXP {
                 let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
@@ -506,6 +507,7 @@ fn roxido_fn(options: Vec<NestedMeta>, item_fn: syn::ItemFn) -> TokenStream {
     } else {
         TokenStream::from(quote! {
             #[allow(clippy::useless_transmute)]
+            #[allow(clippy::not_unsafe_ptr_arg_deref)]
             #[no_mangle]
             pub extern "C" fn #name(#new_args) -> SEXP {
                 let result: Result<SEXP, _> = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
