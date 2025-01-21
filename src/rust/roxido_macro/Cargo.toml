@@ -4,10 +4,9 @@ version = "0.6.0"
 authors = ["David B. Dahl <dahl@stat.byu.edu>"]
 edition = "2021"
 description = "Macros to support the roxido crate"
-homepage = "https://github.com/dbdahl/cargo-framework"
+homepage = "https://github.com/roxido-framework/roxidoExample"
 license = "MIT OR Apache-2.0"
 publish = false
-rust-version = "1.67.1"
 
 [lib]
 proc-macro = true

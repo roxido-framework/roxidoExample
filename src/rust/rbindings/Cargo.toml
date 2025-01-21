@@ -8,6 +8,5 @@ homepage = "https://github.com/roxido-framework/roxidoExample"
 readme = "README.md"
 license = "LGPL-2.1"
 publish = false
-rust-version = "1.67.1"
 
 [dependencies]

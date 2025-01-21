@@ -478,7 +478,7 @@ fn roxido_fn(options: Vec<NestedMeta>, item_fn: syn::ItemFn) -> TokenStream {
                 match result {
                     Ok(obj) => obj,
                     Err(ref payload) => {
-                        use crate::rbindings::*;
+                        use rbindings::*;
                         let msg = match payload.downcast_ref::<RStopHelper>() {
                             Some(x) => x.0.as_str(),
                             None => {

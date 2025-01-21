@@ -10,9 +10,9 @@ checksum = "ace50bade8e6234aa140d9a2f552bbee1db4d353f69b8217bc503490fc1a9f26"
 
 [[package]]
 name = "bitflags"
-version = "2.7.0"
+version = "2.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1be3f42a67d6d345ecd59f675f3f012d6974981560836e938c22b424b85ce1be"
+checksum = "8f68f53c83ab957f72c32642f3868eec03eb974d1fb82e453128456482613d36"
 
 [[package]]
 name = "block-buffer"
@@ -164,9 +164,9 @@ dependencies = [
 
 [[package]]
 name = "faer"
-version = "0.21.2"
+version = "0.21.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "aa910e3f7076908674740bc35f0f69be7d28d3bd541552a12540d162337cf0ea"
+checksum = "492ef86d9ddb19c1d8967698538cd22e0f2083fc6c76ca6e1ad9ee2f73db3c7c"
 dependencies = [
  "bytemuck",
  "dyn-stack",
@@ -524,9 +524,9 @@ dependencies = [
 
 [[package]]
 name = "pulp"
-version = "0.21.3"
+version = "0.21.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e3ed12c03a1e4e8bb48e8e21e29f9902c06b3be664ac7708111751089f56b11f"
+checksum = "95fb7a99b37aaef4c7dd2fd15a819eb8010bfc7a2c2155230d51f497316cad6d"
 dependencies = [
  "bytemuck",
  "cfg-if",
@@ -600,9 +600,9 @@ dependencies = [
 
 [[package]]
 name = "raw-cpuid"
-version = "11.2.0"
+version = "11.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1ab240315c661615f2ee9f0f2cd32d5a7343a84d5ebcccb99d46e6637565e7b0"
+checksum = "c6928fa44c097620b706542d428957635951bade7143269085389d42c8a4927e"
 dependencies = [
  "bitflags",
 ]
@@ -628,6 +628,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "rbindings"
+version = "0.6.0"
+
+[[package]]
 name = "reborrow"
 version = "0.5.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -637,6 +641,7 @@ checksum = "03251193000f4bd3b042892be858ee50e8b3719f2b08e5833ac4353724632430"
 name = "roxido"
 version = "0.6.0"
 dependencies = [
+ "rbindings",
  "roxido_macro",
 ]
 
