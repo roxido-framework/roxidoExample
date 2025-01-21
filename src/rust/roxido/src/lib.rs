@@ -66,7 +66,7 @@
 /// ```
 pub use roxido_macro::roxido;
 
-pub mod rbindings;
+pub use rbindings;
 pub use rbindings::SEXP;
 
 use rbindings::*;
