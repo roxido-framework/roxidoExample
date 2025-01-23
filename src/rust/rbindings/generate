@@ -16,7 +16,7 @@ fi
 
 if [[ $# -eq 0 ]]
 then
-  INCLUDE_PATH=$(Rscript -e 'cat(file.path(R.home(), "include"))')
+  INCLUDE_PATH=$(Rscript -e 'cat(R.home("include"))')
 else
   INCLUDE_PATH="$1"
 fi
