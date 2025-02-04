@@ -112,7 +112,6 @@ fn automatic_type_declare_matrix_and_array(_a1: &RMatrix<i32>, _a2: &RArray<u8>)
 // Lists are also supported.  Note the use of 0-based indexing.
 #[roxido]
 fn lists(a1: &RList) {
-    let _my_list = RList::with_names(&["first.name", "last.name", "age"], pc);
     let first_element = a1.get(0).stop_str("The supplied list is empty.");
     let name = a1.get_names().get(0).stop_str("Couldn't get name.");
     rprintln!("The name of the first element is: {}", name);
@@ -126,7 +125,19 @@ fn lists(a1: &RList) {
         _ => {
             rprintln!("Got something I didn't expect!")
         }
+    };
+    let my_list = RList::with_names(&["first.name", "last.name", "age"], pc);
+    let _ = my_list.set(0, "David".to_r(pc));
+    let _ = my_list.set(1, "Dahl".to_r(pc));
+    let _ = my_list.set(2, 10.to_r(pc));
+    let big_list = RList::new(100_000, pc);
+    for i in 0..big_list.len() {
+        // Blows the stack!
+        // let _ = big_list.set(i, "David".to_r(pc));
+        // Does not blows the stack.
+        let _ = big_list.set_with_closure(i, |pc| "David".to_r(pc)); // Does not blow the stack.
     }
+    big_list
 }
 
 // The function below finds a root of a univariate function supplied by the R

@@ -2075,6 +2075,23 @@ macro_rules! rlistlike {
                 }
             }
 
+            /// Set the value at a certain index in the R list.
+            pub fn set_with_closure<T: RObjectVariant, F: FnOnce(&mut Pc) -> &mut T>(
+                &mut self,
+                index: usize,
+                x: F,
+            ) -> Result<(), &'static str> {
+                if index < self.len() {
+                    let mut pc = Pc::default();
+                    unsafe {
+                        SET_VECTOR_ELT(self.sexp(), index.try_into().unwrap(), x(&mut pc).sexp())
+                    };
+                    Ok(())
+                } else {
+                    Err("Index out of bounds.")
+                }
+            }
+
             /// Get a value in an R list based on its key.
             pub fn get_by_key(&self, key: impl AsRef<str>) -> Result<&RObject, String> {
                 let names = self.get_names();
