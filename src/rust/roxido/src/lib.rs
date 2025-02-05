@@ -2075,8 +2075,11 @@ macro_rules! rlistlike {
                 }
             }
 
-            /// Set the value at a certain index in the R list.
-            pub fn set_with_closure<T: RObjectVariant, F: FnOnce(&mut Pc) -> &mut T>(
+            /// Set the value at a certain index in the R list via a closure with a mutable reference to a local Pc.
+            ///
+            /// This is slightly less efficient than `set` but is useful to avoid overflowing R's PROTECT stack for
+            /// very large lists.
+            pub fn set_with_pc<T: RObjectVariant, F: FnOnce(&mut Pc) -> &T>(
                 &mut self,
                 index: usize,
                 x: F,

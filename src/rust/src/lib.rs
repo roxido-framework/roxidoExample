@@ -135,7 +135,7 @@ fn lists(a1: &RList) {
         // Blows the stack!
         // let _ = big_list.set(i, "David".to_r(pc));
         // Does not blows the stack.
-        let _ = big_list.set_with_closure(i, |pc| "David".to_r(pc)); // Does not blow the stack.
+        let _ = big_list.set_with_pc(i, |pc| "David".to_r(pc)); // Does not blow the stack.
     }
     big_list
 }
