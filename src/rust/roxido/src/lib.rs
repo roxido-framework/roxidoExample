@@ -2095,6 +2095,28 @@ macro_rules! rlistlike {
                 }
             }
 
+            /// Set the values in the R list via a closure with a mutable reference to a local Pc.
+            ///
+            /// This is slightly less efficient than `set` but is useful to avoid overflowing R's PROTECT stack for
+            /// very large lists.
+            pub fn set_loop_with_pc<T: RObjectVariant, F: FnMut(&mut Pc) -> &T>(
+                &mut self,
+                index: usize,
+                mut x: F,
+            ) -> Result<(), &'static str> {
+                if index < self.len() {
+                    let mut pc = Pc::default();
+                    for i in 0..self.len() {
+                        unsafe {
+                            SET_VECTOR_ELT(self.sexp(), i.try_into().unwrap(), x(&mut pc).sexp())
+                        };
+                    }
+                    Ok(())
+                } else {
+                    Err("Index out of bounds.")
+                }
+            }
+
             /// Get a value in an R list based on its key.
             pub fn get_by_key(&self, key: impl AsRef<str>) -> Result<&RObject, String> {
                 let names = self.get_names();
