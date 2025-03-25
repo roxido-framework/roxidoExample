@@ -139,4 +139,7 @@ unlink("roxido.txt")
 
 file.copy(sprintf("target/%s/release/librust.a", target_triple),
           "..", overwrite = TRUE)
+if (cran_build) {
+  unlink("target", recursive = TRUE, force = TRUE, expand = FALSE)
+}
 message("Built Rust static library.")
