@@ -798,7 +798,11 @@ impl RObject {
 
     /// Check if it can be interpreted as a data frame in R.
     pub fn is_data_frame(&self) -> bool {
-        unsafe { Rf_isFrame(self.sexp()) != 0 }
+        if unsafe { TYPEOF(self.sexp()) } != VECSXP as i32 {
+            return false;
+        }
+        let cstr = CString::new("data.frame").unwrap();
+        unsafe { Rf_inherits(self.sexp(), cstr.as_ptr()) != 0 }
     }
 
     /// Check if it can be interpreted as a function in R.
