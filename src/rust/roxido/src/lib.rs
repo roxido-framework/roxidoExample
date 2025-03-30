@@ -47,23 +47,7 @@
 //   https://www.tidyverse.org/blog/2019/05/resource-cleanup-in-c-and-the-r-api
 //   https://github.com/wch/r-source
 
-/// A procedural macro for calling a Rust function from R.
-///
-/// # Example
-///
-/// ```
-/// #[roxido]
-/// fn convolve2(a: &RVector, b: &RVector) {
-///     let vec = RVector::from_value(0.0, a.len() + b.len() - 1, pc);
-///     let ab = vec.slice_mut();
-///     for (i, ai) in a.to_f64(pc).slice().iter().enumerate() {
-///         for (j, bj) in b.to_f64(pc).slice().iter().enumerate() {
-///             ab[i + j] += ai * bj;
-///         }
-///     }
-///     vec
-/// }
-/// ```
+/// A procedural macro to facilitate calling a Rust function from R.
 pub use roxido_macro::roxido;
 
 pub use rbindings;
