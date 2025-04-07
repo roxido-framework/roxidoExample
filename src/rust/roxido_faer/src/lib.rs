@@ -27,7 +27,7 @@ pub trait ToR<T: RObjectVariant> {
     fn to_r(self, pc: &Pc) -> &mut T;
 }
 
-impl<'a> ToR<RMatrix<f64>> for MatRef<'a, f64> {
+impl ToR<RMatrix<f64>> for MatRef<'_, f64> {
     fn to_r(self, pc: &Pc) -> &mut RMatrix<f64> {
         let nr = self.nrows();
         let nc = self.ncols();
