@@ -17,9 +17,12 @@ delete-release tag:
   git push --delete origin {{tag}}
   git tag -d {{tag}}
 
+date := `date +"%y.%m.%d"`
+
 new-release:
-  -just delete-release `date +"v%y.%m.%d"`
+  -just delete-release v{{date}}
   -just delete-release latest
-  git tag `date +"v%y.%m.%d"`
+  git tag v{{date}}
   git tag latest
   git push --tags
+  sed -i 's/^RoxidoVersion: .*$/RoxidoVersion: {{date}}/' DESCRIPTION
