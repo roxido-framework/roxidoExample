@@ -24,7 +24,7 @@ new-release: check-clean
   -just delete-release latest
   sed -i 's|^Config/Roxido/Version: .*$|Config/Roxido/Version: {{date}}|' DESCRIPTION
   git add DESCRIPTION
-  git commit -m "New release: v{{date}}"
+  git commit -m "New release: v{{date}}" || true
   git tag v{{date}}
   git tag latest
   git push --tags
