@@ -11,7 +11,7 @@ roxygen2:
   Rscript -e "roxygen2::roxygenise()"
 
 api:
-  cd src/rust/roxido; cargo doc --open
+  roxido api
 
 delete-release tag:
   git push --delete origin {{tag}}
@@ -22,9 +22,9 @@ date := `date +"%y.%m.%d"`
 new-release: check-clean
   -just delete-release v{{date}}
   -just delete-release latest
-  sed -i 's|^Config/Roxido/Version: .*$|Config/Roxido/Version: {{date}}|' DESCRIPTION
-  git add DESCRIPTION
-  git commit -m "New release: v{{date}}" || true
+  sed -i 's|^Config/Roxido/Version: .*$|Config/Roxido/Version: {{date}}|' DESCRIPTION  # Delete
+  git add DESCRIPTION                                                                  # Delete
+  git commit -m "New release: v{{date}}" || true                                       # Delete
   git tag v{{date}}
   git tag latest
   git push --tags
