@@ -15,8 +15,16 @@ set CWD $PWD
 set DEST "$CWD/src/lib.rs"
 
 function usage
-    echo "usage: $argv[0] [ PATH_OF_R_HEADER_FILES ]" >&2
+    echo "usage: "(status --current-filename)" [ --all ] [ PATH_OF_R_HEADER_FILES ]" >&2
     exit 1
+end
+
+set all false
+if test (count $argv) -gt 0
+    if test $argv[1] = --all
+        set all true
+        set argv $argv[2..-1]
+    end
 end
 
 if test (count $argv) -gt 1
@@ -45,18 +53,18 @@ cd $CWD/..
 set MSRV (cargo metadata --no-deps --format-version 1 | jq -r '.packages[0].rust_version')
 echo "MSRV: $MSRV"
 
-# Collect missing symbols from cargo check
-set missing Rf_error R_CallMethodDef R_registerRoutines R_useDynamicSymbols R_forceSymbols Rf_rnorm
-set missing $missing (cargo check 2>&1 | rg 'error.*cannot find.*in this scope' | rg -o '`[^`]+`' | tr -d '`' | sort -u)
-
-# Build up bindgen arguments
 set allowlist
-for name in $missing
-    set allowlist $allowlist --allowlist-function $name --allowlist-type $name --allowlist-var $name --allowlist-item $name
+if test $all = false
+    # Collect missing symbols from cargo check
+    set missing Rf_error R_CallMethodDef R_registerRoutines R_useDynamicSymbols R_forceSymbols Rf_rnorm
+    set missing $missing (cargo check 2>&1 | rg 'error.*cannot find.*in this scope' | rg -o '`[^`]+`' | tr -d '`' | sort -u)
+
+    # Build up bindgen arguments
+    for name in $missing
+        set allowlist $allowlist --allowlist-function $name --allowlist-type $name --allowlist-var $name --allowlist-item $name
+    end
 end
 
 cd $CWD
-$CWD/bin/bindgen $CWD/wrapper.h \
-    --rust-target $MSRV \
-    $allowlist \
-    -- -I$INCLUDE_PATH >>$DEST
+
+bin/bindgen wrapper.h --rust-target $MSRV $allowlist -- -I$INCLUDE_PATH >>$DEST
