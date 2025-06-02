@@ -3,6 +3,7 @@ arch <- R.version$arch
 
 dcf <- read.dcf("DESCRIPTION")
 
+message("Timestamp: ", format(Sys.time(), tz = "UTC", usetz = TRUE))
 system_requirements <- unname(dcf[, "SystemRequirements"])
 message(sprintf("SystemRequirements: %s", system_requirements))
 
