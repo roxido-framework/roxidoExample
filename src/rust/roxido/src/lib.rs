@@ -2312,6 +2312,22 @@ impl RExternalPtr {
     pub fn tag(&self) -> &RObject {
         unsafe { R_ExternalPtrTag(self.sexp()).transmute(self) }
     }
+
+    /// Get &str tag for an R external pointer.
+    ///
+    /// This method gets the &str tag associated with an R external pointer, which was set by [`RObject::as_external_ptr`].
+    /// It turns the empty string "" if the tag is not a character vector of length one.
+    ///
+    pub fn tag_str(&self) -> &str {
+        let tag = self.tag();
+        let Ok(tag) = tag.as_scalar() else {
+            return "";
+        };
+        let Ok(tag) = tag.as_char() else {
+            return "";
+        };
+        tag.get().unwrap_or("")
+    }
 }
 
 // Conversions
