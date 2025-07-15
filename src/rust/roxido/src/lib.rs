@@ -409,6 +409,24 @@ impl R {
         unsafe { R_NilValue.transmute_static() }
     }
 
+    /// Returns R's `NULL` value.
+    #[allow(non_snake_case)]
+    pub fn NULL() -> &'static RObject {
+        unsafe { R_NilValue.transmute_static() }
+    }
+
+    /// Returns R's `TRUE` value for storage mode "integer".
+    #[allow(non_snake_case)]
+    pub fn TRUE() -> i32 {
+        Rboolean_TRUE
+    }
+
+    /// Returns R's `TRUE` value for storage mode "integer".
+    #[allow(non_snake_case)]
+    pub fn FALSE() -> i32 {
+        Rboolean_FALSE
+    }
+
     /// Returns R's `NA` value for storage mode "double".
     pub fn na_f64() -> f64 {
         unsafe { R_NaReal }
