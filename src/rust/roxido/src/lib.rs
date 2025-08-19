@@ -553,7 +553,7 @@ pub enum RObjectEnum<'a> {
 
 impl RObject {
     // Convert to an enumeration of the supported variants.
-    pub fn enumerate(&self) -> RObjectEnum {
+    pub fn enumerate(&self) -> RObjectEnum<'_> {
         if self.is_vector() {
             let s: &RVector = unsafe { self.transmute() };
             if s.is_scalar() {
@@ -2150,7 +2150,7 @@ macro_rules! rlistlike {
             /// This allows Rust's [`HashMap`] methods to be used on the contents
             /// of the list, while still retaining the original list within
             /// the RListMap struct in the robj field.
-            pub fn make_map(&self) -> RListMap {
+            pub fn make_map(&self) -> RListMap<'_> {
                 let mut map = HashMap::new();
                 let names = self.get_names();
                 let len = names.len();
