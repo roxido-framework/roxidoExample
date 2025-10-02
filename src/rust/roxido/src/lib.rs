@@ -2193,8 +2193,7 @@ impl RExternalPtr {
     /// Move Rust object to an R external pointer.
     ///
     /// This *method* moves a Rust object to an R external pointer and then, as far as Rust is concerned, leaks the memory.
-    /// Thus the programmer is then responsible to release the memory by calling [`RExternalPtr::decode_val`]
-    /// unless `managed_By_r` is `true`.
+    /// R will automatically free the memory when the associated R object is collected.
     #[allow(clippy::mut_from_ref)]
     pub fn encode<'a, T>(x: T, tag: &str, pc: &'a Pc) -> &'a mut Self {
         Self::encode_full(x, tag.to_r(pc), true, pc)
@@ -2204,7 +2203,7 @@ impl RExternalPtr {
     ///
     /// This *method* moves a Rust object to an R external pointer and then, as far as Rust is concerned, leaks the memory.
     /// Thus the programmer is then responsible to release the memory by calling [`RExternalPtr::decode_val`]
-    /// unless `managed_By_r` is `true`.
+    /// unless `managed_by_r` is `true`.
     #[allow(clippy::mut_from_ref)]
     pub fn encode_full<'a, T>(
         x: T,
