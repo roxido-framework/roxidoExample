@@ -2239,6 +2239,11 @@ impl RExternalPtr {
         unsafe { Rf_getAttrib(self.sexp(), R_AtsignSymbol) == R_AtsignSymbol }
     }
 
+    /// Check if an external pointer is null.
+    pub fn is_null(&self) -> bool {
+        self.address().is_null()
+    }
+
     /// Move an R external pointer to a Rust object.
     ///
     /// This method moves an R external pointer created by [`RObject::as_external_ptr`] to a Rust object and Rust will then manage its memory.
