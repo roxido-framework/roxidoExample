@@ -13,10 +13,9 @@ One paragraph description of what the package does.
 
 Other contributors:
 \itemize{
-  \item David B. Dahl \email{dahl@stat.byu.edu} (Rust crates: roxido, roxido_macro.) [copyright holder]
-  \item Alex Crichton \email{alex@alexcrichton.com} (Rust crate: proc-macro2.) [copyright holder]
-  \item David Tolnay \email{dtolnay@gmail.com} (Rust crates: syn, proc-macro2, quote, unicode-ident.) [copyright holder]
-  \item Unicode, Inc. (Rust crate: unicode-ident.) [copyright holder]
+  \item Alex Crichton \email{alex@alexcrichton.com} (Rust crate: proc-macro2) [contributor]
+  \item David B. Dahl \email{dahl@stat.byu.edu} (Rust crates: roxido, roxido_macro) [contributor]
+  \item David Tolnay \email{dtolnay@gmail.com} (Rust crates: proc-macro2, quote, syn, unicode-ident) [contributor]
 }
 
 }

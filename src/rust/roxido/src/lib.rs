@@ -2314,7 +2314,7 @@ impl RExternalPtr {
     }
 
     /// Get the memory address of the external pointer.
-    pub fn set_address(&self, addr: &mut c_void) -> *mut c_void {
+    pub fn set_address(&self, addr: &mut c_void) {
         unsafe { R_SetExternalPtrAddr(self.sexp(), addr) }
     }
 
