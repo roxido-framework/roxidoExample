@@ -2313,6 +2313,11 @@ impl RExternalPtr {
         unsafe { R_ExternalPtrAddr(self.sexp()) }
     }
 
+    /// Get the memory address of the external pointer.
+    pub fn set_address(&self, addr: &mut c_void) -> *mut c_void {
+        unsafe { R_SetExternalPtrAddr(self.sexp(), addr) }
+    }
+
     /// Register the external pointer to be finalized.
     ///
     /// This allows the object to perform cleanup actions when no longer referenced in R.
