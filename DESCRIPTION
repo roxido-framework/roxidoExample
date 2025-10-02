@@ -13,4 +13,4 @@ SystemRequirements: Cargo (Rust's package manager), rustc (>= 1.78.0)
 Encoding: UTF-8
 Roxygen: list(markdown = TRUE)
 RoxygenNote: 7.3.2
-Config/Roxido/Version: 25.08.19
+Config/Roxido/Version: 25.10.02
