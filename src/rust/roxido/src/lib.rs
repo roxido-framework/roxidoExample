@@ -2234,6 +2234,31 @@ impl RExternalPtr {
         }
     }
 
+    /// Reconstitute an Rust object into an R external pointer.
+    ///
+    /// This *method* moves a Rust object to an R external pointer.
+    #[allow(clippy::mut_from_ref)]
+    pub fn reencode<'a, T, F: FnOnce(&RObject) -> T>(&mut self, f: F) {
+        unsafe {
+            if self.is_null() {
+                let ptr = Box::into_raw(Box::new(f(self.tag())));
+                R_SetExternalPtrAddr(self.sexp(), ptr as *mut c_void);
+                if Rf_getAttrib(self.sexp(), R_AtsignSymbol) == R_AtsignSymbol {
+                    unsafe extern "C" fn free<S>(sexp: SEXP) {
+                        let addr = R_ExternalPtrAddr(sexp);
+                        if addr.as_ref().is_none() {
+                            return;
+                        }
+                        let _ = Box::from_raw(addr as *mut S);
+                        R_ClearExternalPtr(sexp);
+                    }
+                    Rf_setAttrib(self.sexp(), R_AtsignSymbol, R_AtsignSymbol);
+                    R_RegisterCFinalizerEx(self.sexp(), Some(free::<T>), 0);
+                }
+            }
+        }
+    }
+
     /// Check if an external pointer is managed by R.
     pub fn is_managed_by_r(&self) -> bool {
         unsafe { Rf_getAttrib(self.sexp(), R_AtsignSymbol) == R_AtsignSymbol }
