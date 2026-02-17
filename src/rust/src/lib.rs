@@ -37,8 +37,8 @@ fn convolve2_byhand(a: SEXP, b: SEXP) {
     let a = a.as_f64().stop_str("'a' is not of storage mode 'double'.");
     let a = a.slice();
     let b = unsafe { RObject::from_sexp(b, pc) };
-    let b = b.as_vector().stop_str("'a' is not a vector.");
-    let b = b.as_f64().stop_str("'a' is not of storage mode 'double'.");
+    let b = b.as_vector().stop_str("'b' is not a vector.");
+    let b = b.as_f64().stop_str("'b' is not of storage mode 'double'.");
     let b = b.slice();
     let vec = RVector::from_value(0.0, a.len() + b.len() - 1, pc);
     let ab = vec.slice_mut();
