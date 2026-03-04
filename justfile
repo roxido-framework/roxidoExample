@@ -5,7 +5,7 @@ build:
   roxido build
 
 expand:
-  roxido expand --color always | bat
+  Rscript -e "cmd <- 'roxido expand --color always'; if (nzchar(Sys.which('bat'))) cmd <- paste(cmd, '| bat'); system(cmd)"
 
 roxygen2:
   Rscript -e "roxygen2::roxygenise()"
@@ -17,20 +17,18 @@ delete-release tag:
   git push --delete origin {{tag}}
   git tag -d {{tag}}
 
-date := `date +"%y.%m.%d"`
+date := datetime("%y.%m.%d")
 
 new-release: check-clean
   -just delete-release v{{date}}
   -just delete-release latest
-  sed -i 's|^Config/Roxido/Version: .*$|Config/Roxido/Version: {{date}}|' DESCRIPTION  # Delete
-  git add DESCRIPTION                                                                  # Delete
-  git commit -m "New release: v{{date}}" || true                                       # Delete
+  Rscript -e "d <- readLines('DESCRIPTION'); d <- sub('^Config/Roxido/Version: .*$', 'Config/Roxido/Version: {{date}}', d); writeLines(d, 'DESCRIPTION')"   # Delete
+  git add DESCRIPTION                                                                                                                                       # Delete
+  git commit -m "New release: v{{date}}" || true                                                                                                            # Delete
   git tag v{{date}}
   git tag latest
   git push --tags
 
 check-clean:
-  @if [ -n "$(git status --porcelain)" ]; then \
-    echo "Uncommitted changes detected! Aborting."; \
-    exit 1; \
-  fi
+  git diff --quiet --exit-code
+  git diff --quiet --exit-code --cached
