@@ -317,17 +317,19 @@ render_makevars <- function(template_path, output_path, cargo_path, rust_deps, c
 
 render_platform_makevars <- function(
   cargo_path,
+  rustc_path,
   rust_dir = file.path("src", "rust"),
   cran_vendor_mode = FALSE
 ) {
   sysname <- Sys.info()[["sysname"]]
   makevars <- file.path("src", "Makevars")
   makevars_win <- file.path("src", "Makevars.win")
-  cargo_env <- if (isTRUE(cran_vendor_mode)) {
-    "CARGO_HOME=\"$(CURDIR)/$(RUST_DIR)/.cargo-home\""
-  } else {
-    ""
+  escaped_rustc <- gsub("\"", "\\\\\"", rustc_path, fixed = TRUE)
+  cargo_env_parts <- sprintf("RUSTC=\"%s\"", escaped_rustc)
+  if (isTRUE(cran_vendor_mode)) {
+    cargo_env_parts <- paste(cargo_env_parts, "CARGO_HOME=\"$(CURDIR)/$(RUST_DIR)/.cargo-home\"")
   }
+  cargo_env <- cargo_env_parts
   unlink(c(makevars, makevars_win), force = TRUE)
 
   if (identical(sysname, "Windows")) {
@@ -373,7 +375,7 @@ if (cran_vendor_mode) {
   note("No src/rust/vendor.tar.xz found; using default Cargo home behavior.")
 }
 
-render_platform_makevars(cargo$path, cran_vendor_mode = cran_vendor_mode)
+render_platform_makevars(cargo$path, rustc$path, cran_vendor_mode = cran_vendor_mode)
 
 dir.create("inst", showWarnings = FALSE, recursive = TRUE)
 writeLines(cargo$version, con = file.path("inst", "cargo.log"), useBytes = TRUE)
