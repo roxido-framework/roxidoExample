@@ -354,6 +354,7 @@ render_platform_makevars <- function(
 }
 
 note("*** starting configure.R ***")
+note(sprintf("Timestamp: %s", Sys.time()))
 
 msrv <- read_msrv(file.path("src", "rust", "Cargo.toml"))
 note(sprintf("MSRV (src/rust/Cargo.toml rust-version): %s", msrv))
