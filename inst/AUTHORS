@@ -1,0 +1,8 @@
+This R package contains Rust code which depends on the Rust crates listed below.
+The source code is vendored in the R package and can also be found at
+https://crates.io/crates/XXXX, where XXXX is a crate name below.
+The authors of these Rust crates are listed below.
+
+Alex Crichton <alex@alexcrichton.com> : proc-macro2
+David B. Dahl <dahl@stat.byu.edu>     : rbindings, roxido, roxido_macro
+David Tolnay <dtolnay@gmail.com>      : proc-macro2, quote, syn, unicode-ident

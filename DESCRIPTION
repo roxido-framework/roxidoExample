@@ -1,16 +1,13 @@
 Package: roxidoExample
 Title: A Short Phrase in Title Case
 Version: 0.1.0
-Authors@R: c(person(given = "First", family = "Last", role = c("aut", "cre"), email = "name@gmail.com", comment = c(ORCID = "ORCID-ID")),
-    person(given = "Alex", family = "Crichton", email = "alex@alexcrichton.com", role = "ctb", comment = c("Rust crate: proc-macro2")),
-    person(given = "David B.", family = "Dahl", email = "dahl@stat.byu.edu", role = "ctb", comment = c("Rust crates: roxido, roxido_macro")),
-    person(given = "David", family = "Tolnay", email = "dtolnay@gmail.com", role = "ctb", comment = c("Rust crates: proc-macro2, quote, syn, unicode-ident")),
-    person())
+Authors@R: c(person(given = "@ROXIDO_GIVEN@", family = "@ROXIDO_FAMILY@", role = c("aut", "cre"), email = "@ROXIDO_EMAIL@", comment = c(ORCID = "ORCID-ID")),
+             person(given = "Authors of the dependency Rust crates", role = "ctb", comment = "see inst/AUTHORS file for details"))
 Description: One paragraph description of what the package does.
 License: MIT + file LICENSE | Apache License 2.0
-Depends: R (>= 4.2.0)
-SystemRequirements: Cargo (Rust's package manager), rustc (>= 1.78.0)
+Depends: R (>= 4.3)
+SystemRequirements: Cargo (Rust's package manager), rustc
 Encoding: UTF-8
 Roxygen: list(markdown = TRUE)
-RoxygenNote: 7.3.2
+RoxygenNote: 7.3.3
 Config/Roxido/Version: 26.03.04

@@ -22,9 +22,6 @@ date := datetime("%y.%m.%d")
 new-release: check-clean
   -just delete-release v{{date}}
   -just delete-release latest
-  Rscript -e "d <- readLines('DESCRIPTION'); d <- sub('^Config/Roxido/Version: .*$', 'Config/Roxido/Version: {{date}}', d); writeLines(d, 'DESCRIPTION')"   # Delete
-  git add DESCRIPTION                                                                                                                                       # Delete
-  git commit -m "New release: v{{date}}" || true                                                                                                            # Delete
   git tag v{{date}}
   git tag latest
   git push --tags
