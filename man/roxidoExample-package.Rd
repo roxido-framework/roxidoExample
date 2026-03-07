@@ -9,7 +9,7 @@
 One paragraph description of what the package does.
 }
 \author{
-\strong{Maintainer}: @ROXIDO_GIVEN_NAME@ @ROXIDO_FAMILY_NAME@ \email{@ROXIDO_EMAIL@}
+\strong{Maintainer}: @ROXIDO_GIVEN_NAME@ @ROXIDO_FAMILY_NAME@ \email{ROXIDO@INVALID}
 
 Other contributors:
 \itemize{

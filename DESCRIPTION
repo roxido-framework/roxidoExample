@@ -1,7 +1,7 @@
 Package: roxidoExample
 Title: A Short Phrase in Title Case
 Version: 0.1.0
-Authors@R: c(person(given = "@ROXIDO_GIVEN_NAME@", family = "@ROXIDO_FAMILY_NAME@", role = c("aut", "cre"), email = "@ROXIDO_EMAIL@"),
+Authors@R: c(person(given = "@ROXIDO_GIVEN_NAME@", family = "@ROXIDO_FAMILY_NAME@", role = c("aut", "cre"), email = "ROXIDO@INVALID"),
              person(given = "Authors of the dependency Rust crates", role = "ctb", comment = "see inst/AUTHORS file for details"))
 Description: One paragraph description of what the package does.
 License: MIT + file LICENSE | Apache License 2.0
