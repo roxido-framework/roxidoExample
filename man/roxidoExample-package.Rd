@@ -9,13 +9,11 @@
 One paragraph description of what the package does.
 }
 \author{
-\strong{Maintainer}: First Last \email{name@gmail.com} (\href{https://orcid.org/ORCID-ID}{ORCID})
+\strong{Maintainer}: @ROXIDO_GIVEN_NAME@ @ROXIDO_FAMILY_NAME@ \email{ROXIDO@INVALID}
 
 Other contributors:
 \itemize{
-  \item Alex Crichton \email{alex@alexcrichton.com} (Rust crate: proc-macro2) [contributor]
-  \item David B. Dahl \email{dahl@stat.byu.edu} (Rust crates: roxido, roxido_macro) [contributor]
-  \item David Tolnay \email{dtolnay@gmail.com} (Rust crates: proc-macro2, quote, syn, unicode-ident) [contributor]
+  \item Authors of the dependency Rust crates (see inst/AUTHORS file for details) [contributor]
 }
 
 }
