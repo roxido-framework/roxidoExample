@@ -1,7 +1,7 @@
 Package: roxidoExample
 Title: A Short Phrase in Title Case
 Version: 0.1.0
-Authors@R: c(person(given = "@ROXIDO_GIVEN_NAME@", family = "@ROXIDO_FAMILY_NAME@", role = c("aut", "cre"), email = "ROXIDO@INVALID"),
+Authors@R: c(person(given = "@ROXIDO_GIVEN_NAME@", family = "@ROXIDO_FAMILY_NAME@", role = c("aut", "cre"), email = "@ROXIDO_EMAIL@"),
              person(given = "Authors of the dependency Rust crates", role = "ctb", comment = "see inst/AUTHORS file for details"))
 Description: One paragraph description of what the package does.
 License: MIT + file LICENSE | Apache License 2.0
@@ -10,4 +10,5 @@ SystemRequirements: Cargo (Rust's package manager), rustc
 Encoding: UTF-8
 Roxygen: list(markdown = TRUE)
 RoxygenNote: 7.3.3
-Config/Roxido/Version: 26.03.04
+Config/Roxido/TemplateVersion: 26.03.04
+Config/Roxido/MinCLIVersion: 0.8.0
