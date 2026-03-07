@@ -1,0 +1,27 @@
+# Manifest for "roxido update". Processed by the roxido CLI tool.
+
+# Files and directories to copy from the template, replacing any existing.
+overwrite configure
+overwrite configure.win
+overwrite cleanup
+overwrite cleanup.win
+overwrite INSTALL
+overwrite tools/configure.R
+overwrite src/Makevars.in
+overwrite src/Makevars.win.in
+overwrite src/abort_shim.c
+overwrite src/rust/build.rs
+overwrite src/rust/rbindings
+overwrite src/rust/roxido
+overwrite src/rust/roxido_macro
+overwrite .gitignore
+overwrite .Rbuildignore
+overwrite R/.gitignore
+overwrite inst/.gitignore
+overwrite src/.gitignore
+overwrite src/rust/.gitignore
+
+# Obsolete files to delete from the target package.
+delete tools/build_rust_library.R
+delete src/Makevars
+delete src/Makevars.win
