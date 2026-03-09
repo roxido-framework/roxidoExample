@@ -110,7 +110,7 @@ pub trait RObjectVariant: Sized {
     where
         Self: Sized,
     {
-        self.sexp().transmute(self)
+        unsafe { self.sexp().transmute(self) }
     }
 
     /// # Safety
@@ -119,7 +119,7 @@ pub trait RObjectVariant: Sized {
     where
         Self: Sized,
     {
-        self.sexp().transmute_mut(self)
+        unsafe { self.sexp().transmute_mut(self) }
     }
 
     /// Duplicate an R object.
@@ -2220,12 +2220,14 @@ impl RExternalPtr {
             ));
             if managed_by_r {
                 unsafe extern "C" fn free<S>(sexp: SEXP) {
-                    let addr = R_ExternalPtrAddr(sexp);
-                    if addr.as_ref().is_none() {
-                        return;
+                    unsafe {
+                        let addr = R_ExternalPtrAddr(sexp);
+                        if addr.as_ref().is_none() {
+                            return;
+                        }
+                        let _ = Box::from_raw(addr as *mut S);
+                        R_ClearExternalPtr(sexp);
                     }
-                    let _ = Box::from_raw(addr as *mut S);
-                    R_ClearExternalPtr(sexp);
                 }
                 Rf_setAttrib(sexp, R_AtsignSymbol, R_AtsignSymbol);
                 R_RegisterCFinalizerEx(sexp, Some(free::<T>), 0);
@@ -2245,12 +2247,14 @@ impl RExternalPtr {
                 R_SetExternalPtrAddr(self.sexp(), ptr as *mut c_void);
                 if Rf_getAttrib(self.sexp(), R_AtsignSymbol) == R_AtsignSymbol {
                     unsafe extern "C" fn free<S>(sexp: SEXP) {
-                        let addr = R_ExternalPtrAddr(sexp);
-                        if addr.as_ref().is_none() {
-                            return;
+                        unsafe {
+                            let addr = R_ExternalPtrAddr(sexp);
+                            if addr.as_ref().is_none() {
+                                return;
+                            }
+                            let _ = Box::from_raw(addr as *mut S);
+                            R_ClearExternalPtr(sexp);
                         }
-                        let _ = Box::from_raw(addr as *mut S);
-                        R_ClearExternalPtr(sexp);
                     }
                     Rf_setAttrib(self.sexp(), R_AtsignSymbol, R_AtsignSymbol);
                     R_RegisterCFinalizerEx(self.sexp(), Some(free::<T>), 0);
@@ -2307,8 +2311,10 @@ impl RExternalPtr {
     /// Despite the use of a static lifetime here, the reference is only valid as long as R's
     /// garbage collector has not reclaimed the underlying object's memory.
     pub unsafe fn decode_ref_static<T>(&self) -> &'static T {
-        let ptr = R_ExternalPtrAddr(self.sexp()) as *mut T;
-        ptr.as_ref().unwrap()
+        unsafe {
+            let ptr = R_ExternalPtrAddr(self.sexp()) as *mut T;
+            ptr.as_ref().unwrap()
+        }
     }
 
     /// Obtain a mutable reference to a Rust object from an R external pointer.
@@ -2329,8 +2335,10 @@ impl RExternalPtr {
     /// Despite the use of a static lifetime here, the reference is only valid as long as R's
     /// garbage collector has not reclaimed the underlying object's memory.
     pub unsafe fn decode_mut_static<T>(&mut self) -> &'static mut T {
-        let ptr = R_ExternalPtrAddr(self.sexp()) as *mut T;
-        ptr.as_mut().unwrap()
+        unsafe {
+            let ptr = R_ExternalPtrAddr(self.sexp()) as *mut T;
+            ptr.as_mut().unwrap()
+        }
     }
 
     /// Get the memory address of the external pointer.
@@ -2726,7 +2734,7 @@ impl<T> UnwrapOrStop<T> for Option<T> {
 }
 
 #[doc(hidden)]
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn __private_set_custom_panic_hook() -> SEXP {
     let default_panic = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |panic_info| {

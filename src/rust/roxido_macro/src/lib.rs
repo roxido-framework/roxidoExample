@@ -457,7 +457,7 @@ fn roxido_fn(options: Vec<NestedMeta>, item_fn: syn::ItemFn) -> TokenStream {
     TokenStream::from(quote! {
         #[allow(clippy::useless_transmute)]
         #[allow(clippy::not_unsafe_ptr_arg_deref)]
-        #[no_mangle]
+        #[unsafe(no_mangle)]
         pub extern "C" fn #name(#new_args) -> SEXP {
             let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                 let pc = &mut Pc::__private_new();

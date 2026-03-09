@@ -76,7 +76,7 @@ fn make_registration_code(src_path: &Path) -> Option<String> {
                 snippet.push_str(&format!(
                     r#"use roxido::*;
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 extern "C" fn R_init_{}_rust(info: *mut rbindings::DllInfo) {{
     let mut call_routines = Vec::with_capacity({});
     let mut _names: Vec<std::ffi::CString> = Vec::with_capacity({});"#,

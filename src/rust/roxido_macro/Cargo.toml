@@ -2,7 +2,8 @@
 name = "roxido_macro"
 version = "0.6.0"
 authors = ["David B. Dahl <dahl@stat.byu.edu>"]
-edition = "2021"
+edition = "2024"
+rust-version = "1.88"
 description = "Macros to support the roxido crate"
 homepage = "https://github.com/roxido-framework/roxidoExample"
 license = "MIT OR Apache-2.0"
