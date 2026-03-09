@@ -27,6 +27,7 @@ new-release: check-clean
   git commit -m "New release: v{{date}}" || true                                                       # Delete
   git tag v{{date}}
   git tag latest
+  git push
   git push --tags
 
 check-clean:
