@@ -17,7 +17,7 @@ delete-release tag:
   git push --delete origin {{tag}}
   git tag -d {{tag}}
 
-date := datetime("%y.%m.%d")
+date := datetime("%y.%m.%d-%R")
 
 new-release: check-clean
   -just delete-release v{{date}}
