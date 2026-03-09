@@ -486,7 +486,7 @@ fn roxido_fn(options: Vec<NestedMeta>, item_fn: syn::ItemFn) -> TokenStream {
                     };
                     drop(result);
                     unsafe {
-                        Rf_error(b"%.*s\0".as_ptr() as *const std::os::raw::c_char, len, R_CHAR(sexp));
+                        Rf_error(c"%.*s".as_ptr(), len, R_CHAR(sexp));
                     }
                     R::null().sexp()  // We never get here.
                 }

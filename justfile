@@ -22,6 +22,9 @@ date := datetime("%y.%m.%d")
 new-release: check-clean
   -just delete-release v{{date}}
   -just delete-release latest
+  sed -i 's|^Config/Roxido/Version: .*$|Config/Roxido/Version: {{date}}|' DESCRIPTION  # Delete
+  git add DESCRIPTION                                                                  # Delete
+  git commit -m "New release: v{{date}}" || true                                       # Delete
   git tag v{{date}}
   git tag latest
   git push --tags

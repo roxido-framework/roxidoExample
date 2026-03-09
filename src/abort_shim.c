@@ -1,4 +1,7 @@
-#include <R_ext/Error.h>
+#if defined(__GNUC__) || defined(__clang__)
+__attribute__((noreturn))
+#endif
+extern void Rf_error(const char *, ...);
 
 #if defined(_WIN32)
 #  if defined(__GNUC__) || defined(__clang__)
