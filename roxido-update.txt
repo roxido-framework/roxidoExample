@@ -9,7 +9,7 @@ overwrite INSTALL
 overwrite tools/configure.R
 overwrite src/Makevars.in
 overwrite src/Makevars.win.in
-overwrite src/abort_shim.c
+overwrite src/shims.c
 overwrite src/rust/build.rs
 overwrite src/rust/rbindings
 overwrite src/rust/roxido
@@ -21,8 +21,12 @@ overwrite inst/.gitignore
 overwrite src/.gitignore
 overwrite src/rust/.gitignore
 
+# Renamed files.
+rename src/shim.c src/r_init_shim.c
+
 # Obsolete files to delete from the target package.
 delete tools/build_rust_library.R
+delete src/abort_shim.c
 
 # Previously committed files now generated at configure time and gitignored.
 # The CLI will "git rm --cached" them so they become untracked.
