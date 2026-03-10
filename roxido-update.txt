@@ -23,5 +23,8 @@ overwrite src/rust/.gitignore
 
 # Obsolete files to delete from the target package.
 delete tools/build_rust_library.R
-delete src/Makevars
-delete src/Makevars.win
+
+# Previously committed files now generated at configure time and gitignored.
+# The CLI will "git rm --cached" them so they become untracked.
+untrack src/Makevars
+untrack src/Makevars.win
