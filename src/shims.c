@@ -24,6 +24,9 @@ extern void Rf_error(const char *, ...);
 #  endif
 #endif
 
+#if defined(__GNUC__) || defined(__clang__)
+__attribute__((noreturn))
+#endif
 static void exit_shim(const char *fn, int status) {
     Rf_error("Intercepted %s(%d) from Rust and converted to an R error.", fn, status);
 }
