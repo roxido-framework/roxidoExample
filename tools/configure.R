@@ -394,10 +394,12 @@ render_platform_makevars <- function(
       target_flag <- ""
       cargo_pre <- 'unset CARGO_BUILD_TARGET && export RUSTFLAGS="-C link-self-contained=yes" && '
     } else {
-      note(
-        "Non-GNU Windows host detected; cross-compiling with --target=x86_64-pc-windows-gnu."
-      )
-      target_decl <- "TARGET = x86_64-pc-windows-gnu"
+      target <- windows_target()
+      note(sprintf(
+        "Non-GNU Windows host detected; cross-compiling with --target=%s.",
+        target
+      ))
+      target_decl <- paste("TARGET =", target)
       rust_target_lib <- "$(RUST_DIR)/target/$(TARGET)/release/librust.a"
       target_flag <- " --target=$(TARGET)"
       cargo_pre <- ""
@@ -427,6 +429,18 @@ render_platform_makevars <- function(
       )
     )
     note("Rendered src/Makevars from template.")
+  }
+}
+
+windows_target <- function(){
+  if(grepl("aarch", R.version$platform)){
+    "aarch64-pc-windows-gnullvm"
+  } else if(grepl("clang", Sys.getenv('R_COMPILED_BY'))){
+    "x86_64-pc-windows-gnullvm"
+  } else if(grepl("i386", R.version$platform)){
+    "i686-pc-windows-gnu"
+  } else {
+    "x86_64-pc-windows-gnu"
   }
 }
 
