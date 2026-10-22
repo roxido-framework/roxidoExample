@@ -11,6 +11,11 @@ One paragraph description of what the package does.
 \author{
 \strong{Maintainer}: @ROXIDO_GIVEN_NAME@ @ROXIDO_FAMILY_NAME@ \email{ROXIDO@INVALID}
 
+Authors:
+\itemize{
+  \item @ROXIDO_GIVEN_NAME@ @ROXIDO_FAMILY_NAME@ \email{ROXIDO@INVALID}
+}
+
 Other contributors:
 \itemize{
   \item Authors of the dependency Rust crates (see inst/AUTHORS file for details) [contributor]

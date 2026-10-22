@@ -26,7 +26,7 @@ use std::io::Write;
 use std::path::Path;
 use syn::ext::IdentExt;
 use syn::parse::Parser;
-use syn::{parse_quote, Token};
+use syn::{Token, parse_quote};
 
 // See https://doc.rust-lang.org/nomicon/unwinding.html
 //
