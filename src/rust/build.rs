@@ -29,7 +29,9 @@ fn main() {
         let _ = fs::remove_file(src_path);
         String::new()
     });
-    fs::write(dest_path, snippet).expect("Could not write file: {dest_path}");
+    fs::write(&dest_path, snippet).unwrap_or_else(|err| {
+        panic!("Could not write file '{}': {err}", dest_path.display());
+    });
 }
 
 fn make_registration_code(src_path: &Path) -> Option<String> {
@@ -63,16 +65,14 @@ fn make_registration_code(src_path: &Path) -> Option<String> {
                 );
                 let _ = fs::write("../../R/roxido.R", &buffer);
                 let mut snippet = String::new();
+                let n_functions = functions_info.len();
                 snippet.push_str(&format!(
                     r#"use roxido::*;
 
 #[unsafe(no_mangle)]
-extern "C" fn R_init_{}_rust(info: *mut rbindings::DllInfo) {{
-    let mut call_routines = Vec::with_capacity({});
-    let mut _names: Vec<std::ffi::CString> = Vec::with_capacity({});"#,
-                    package_name,
-                    functions_info.len(),
-                    functions_info.len()
+extern "C" fn R_init_{package_name}_rust(info: *mut rbindings::DllInfo) {{
+    let mut call_routines = Vec::with_capacity({n_functions});
+    let mut _names: Vec<std::ffi::CString> = Vec::with_capacity({n_functions});"#
                 ));
                 for line in functions_info {
                     let tidbits: Vec<_> = line.split_whitespace().collect();
@@ -88,13 +88,12 @@ extern "C" fn R_init_{}_rust(info: *mut rbindings::DllInfo) {{
                     let n_args = tidbits.len() - 1;
                     snippet.push_str(&format!(
                         r#"
-    _names.push(std::ffi::CString::new(".{}").unwrap());
+    _names.push(std::ffi::CString::new(".{func_name_for_r}").unwrap());
     call_routines.push(rbindings::R_CallMethodDef {{
         name: _names.last().unwrap().as_ptr(),
-        fun: unsafe {{ std::mem::transmute(crate::{} as *const u8) }},
-        numArgs: {},
-    }});"#,
-                        func_name_for_r, func_name, n_args
+        fun: unsafe {{ std::mem::transmute(crate::{func_name} as *const u8) }},
+        numArgs: {n_args},
+    }});"#
                     ));
                 }
                 snippet.push_str(

@@ -108,7 +108,9 @@ fn roxido_fn(options: Vec<NestedMeta>, item_fn: syn::ItemFn) -> TokenStream {
     // Check that visibility is okay.
     let vis_as_string = quote!(#vis).to_string();
     if !vis_as_string.is_empty() {
-        panic!("A function with the 'roxido' attribute may not have a visibility modifier, but found '{}'.", vis_as_string);
+        panic!(
+            "A function with the 'roxido' attribute may not have a visibility modifier, but found '{vis_as_string}'."
+        );
     }
     // Check that all arguments are of type '&RObject'.
     let mut arg_names = Vec::with_capacity(args.len());
@@ -126,7 +128,9 @@ fn roxido_fn(options: Vec<NestedMeta>, item_fn: syn::ItemFn) -> TokenStream {
                 let name = &pat_type.pat;
                 let name_as_string = quote!(#name).to_string();
                 if let Some(name_as_string) = name_as_string.strip_prefix("mut ") {
-                    panic!("'{}' is marked as mutable, but arguments to 'roxido' functions cannot themselves be mutable.", name_as_string);
+                    panic!(
+                        "'{name_as_string}' is marked as mutable, but arguments to 'roxido' functions cannot themselves be mutable."
+                    );
                 }
                 let ty = &pat_type.ty;
                 let error_msg = || {
@@ -225,7 +229,9 @@ fn roxido_fn(options: Vec<NestedMeta>, item_fn: syn::ItemFn) -> TokenStream {
                                         }
                                     }
                                     _ => {
-                                        panic!("'{}' has type parameter '{}', but one of the following was expected: f64, i32, u8, bool, char, ().", name_as_string, snippet);
+                                        panic!(
+                                            "'{name_as_string}' has type parameter '{snippet}', but one of the following was expected: f64, i32, u8, bool, char, ()."
+                                        );
                                     }
                                 }
                             }
@@ -300,7 +306,9 @@ fn roxido_fn(options: Vec<NestedMeta>, item_fn: syn::ItemFn) -> TokenStream {
                                         );
                                     }
                                     _ => {
-                                        panic!("'{}' is slice of '{}', but a 'roxido' function only supports slices of f64, i32, and u8.", name_as_string, path);
+                                        panic!(
+                                            "'{name_as_string}' is slice of '{path}', but a 'roxido' function only supports slices of f64, i32, and u8."
+                                        );
                                     }
                                 }
                                 if mutable {
@@ -313,13 +321,17 @@ fn roxido_fn(options: Vec<NestedMeta>, item_fn: syn::ItemFn) -> TokenStream {
                             }
                             syn::Type::Path(ty) => {
                                 if reference.lifetime.is_some() {
-                                    panic!("'{}' has a lifetime, which is not supported for a 'roxido' function.", name_as_string);
+                                    panic!(
+                                        "'{name_as_string}' has a lifetime, which is not supported for a 'roxido' function."
+                                    );
                                 }
                                 let path = quote!(#ty).to_string();
                                 match path.as_str() {
                                     "str" => {
                                         if mutable {
-                                            panic!("'{}' is a &mut str, but only &str is supported for a 'roxido' function.", name_as_string);
+                                            panic!(
+                                                "'{name_as_string}' is a &mut str, but only &str is supported for a 'roxido' function."
+                                            );
                                         }
                                         as_rscalar(&mut generated_statements, false);
                                         generated_statements
@@ -409,8 +421,12 @@ fn roxido_fn(options: Vec<NestedMeta>, item_fn: syn::ItemFn) -> TokenStream {
     let func_name = quote!(#name).to_string();
     if let Some(mut path) = r_function_directory {
         path.push(&func_name);
-        let mut file = File::create(&path)
-            .unwrap_or_else(|_| panic!("Could not open file '{:?}' for writing.", &path));
+        let mut file = File::create(&path).unwrap_or_else(|err| {
+            panic!(
+                "Could not open file '{}' for writing: {err}",
+                path.display()
+            );
+        });
         let args = arg_names.join(", ");
         let comma = if args.is_empty() { "" } else { ", " };
         let (invisible_opening, invisible_closing) = match invisible {
@@ -419,11 +435,10 @@ fn roxido_fn(options: Vec<NestedMeta>, item_fn: syn::ItemFn) -> TokenStream {
         };
         let write_result = write!(
             file,
-            "{} <- function({}) {}.Call(.{}{}{}){}",
-            func_name, args, invisible_opening, func_name, comma, args, invisible_closing
+            "{func_name} <- function({args}) {invisible_opening}.Call(.{func_name}{comma}{args}){invisible_closing}"
         );
-        if write_result.is_err() {
-            panic!("Could not write to the file '{:?}'.", path);
+        if let Err(err) = write_result {
+            panic!("Could not write to the file '{}': {err}", path.display());
         }
     } else {
         match std::env::var("R_CARGO_RUN_COUNTER") {

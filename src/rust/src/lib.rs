@@ -64,7 +64,7 @@ fn automatic_type_declaration(a1: SEXP, a2: f64) {
         .as_scalar()
         .stop_str("\'a1\' is expected to be a scalar.");
     let a1 = a1.f64();
-    rprintln!("{} and {} are the same value.", a1, a2);
+    rprintln!("{a1} and {a2} are the same value.");
 }
 
 // Automatic type declaration for "scalars" (i.e., R vectors of length one) are
@@ -114,7 +114,7 @@ fn automatic_type_declare_matrix_and_array(_a1: &RMatrix<i32>, _a2: &RArray<u8>)
 fn lists(a1: &RList) {
     let first_element = a1.get(0).stop_str("The supplied list is empty.");
     let name = a1.get_names().get(0).stop_str("Couldn't get name.");
-    rprintln!("The name of the first element is: {}", name);
+    rprintln!("The name of the first element is: {name}");
     match first_element.enumerate() {
         RObjectEnum::RVector(x) => {
             rprintln!("Got a vector of length {}!", x.len())
@@ -181,7 +181,7 @@ fn zero(f: &RFunction, guess1: f64, guess2: f64, tol: f64) {
         stop!("Oops, values of the function at 'guesses1' and 'guesses2' have the same sign.");
     }
     loop {
-        let xc = 0.5 * (x0 + x1);
+        let xc = x0.midpoint(x1);
         if (x0 - x1).abs() < tol {
             return xc;
         }

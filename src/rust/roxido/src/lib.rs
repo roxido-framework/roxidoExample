@@ -582,14 +582,12 @@ impl RObject {
 
     /// # Safety
     /// Expert use only.
-    #[expect(clippy::not_unsafe_ptr_arg_deref)]
     pub unsafe fn from_sexp<A>(sexp: SEXP, anchor: &A) -> &Self {
         unsafe { sexp.transmute(anchor) }
     }
 
     /// # Safety
     /// Expert use only.
-    #[expect(clippy::not_unsafe_ptr_arg_deref)]
     #[expect(clippy::mut_from_ref)]
     pub unsafe fn from_sexp_mut<A>(sexp: SEXP, anchor: &A) -> &mut Self {
         unsafe { sexp.transmute_mut(anchor) }
@@ -1178,7 +1176,6 @@ impl<T> RScalar<T> {
 macro_rules! rscalar_constructor {
     ($tipe:ty, $code:expr) => {
         impl RScalarConstructor<$tipe> for RScalar<$tipe> {
-            #[expect(clippy::mut_from_ref)]
             fn from_value(value: $tipe, pc: &Pc) -> &mut Self {
                 unsafe { pc.protect_and_transmute($code(value)) }
             }
@@ -1191,14 +1188,12 @@ rscalar_constructor!(i32, Rf_ScalarInteger);
 rscalar_constructor!(u8, Rf_ScalarRaw);
 
 impl RScalarConstructor<bool> for RScalar<bool> {
-    #[expect(clippy::mut_from_ref)]
     fn from_value(value: bool, pc: &Pc) -> &mut Self {
         unsafe { pc.protect_and_transmute(Rf_ScalarLogical(R::as_logical(value))) }
     }
 }
 
 impl RScalarConstructor<&str> for RScalar<char> {
-    #[expect(clippy::mut_from_ref)]
     fn from_value<'a>(value: &str, pc: &'a Pc) -> &'a mut Self {
         unsafe { pc.protect_and_transmute(Rf_ScalarString(pc.protect(charsxp_from_str(value)))) }
     }
@@ -1703,14 +1698,12 @@ impl RVector<char> {
 }
 
 impl RVectorConstructors<&str> for RVector<char> {
-    #[expect(clippy::mut_from_ref)]
     fn new(length: usize, pc: &Pc) -> &mut Self {
         unsafe {
             pc.protect_and_transmute(Rf_allocVector(STRSXP, length.try_into().stop_str(TOO_LONG)))
         }
     }
 
-    #[expect(clippy::mut_from_ref)]
     fn from_value<'a>(value: &str, length: usize, pc: &'a Pc) -> &'a mut Self {
         let length_i32 = length.try_into().stop_str(TOO_LONG);
         let vec = pc.protect(unsafe { Rf_allocVector(STRSXP, length_i32) });
@@ -1724,7 +1717,6 @@ impl RVectorConstructors<&str> for RVector<char> {
         unsafe { vec.transmute_mut(pc) }
     }
 
-    #[expect(clippy::mut_from_ref)]
     fn from_array<'a, const N: usize>(array: [&str; N], pc: &'a Pc) -> &'a mut Self {
         let result = Self::new(array.len(), pc);
         for (index, value) in array.iter().enumerate() {
@@ -1733,7 +1725,6 @@ impl RVectorConstructors<&str> for RVector<char> {
         result
     }
 
-    #[expect(clippy::mut_from_ref)]
     fn from_slice<'a>(slice: &[&str], pc: &'a Pc) -> &'a mut Self {
         let result = Self::new(slice.len(), pc);
         for (index, value) in slice.iter().enumerate() {
@@ -1976,13 +1967,15 @@ impl<T> RArray<T> {
             match dimnames.get(i).unwrap().as_vector() {
                 Ok(names) => {
                     if names.len() != len {
-                        return Err(format!("Element {} of the dimnames list has length {}, but the corresponding dimension is {}.", i, names.len(), len));
+                        return Err(format!(
+                            "Element {i} of the dimnames list has length {}, but the corresponding dimension is {len}.",
+                            names.len()
+                        ));
                     }
                 }
                 Err(_) => {
                     return Err(format!(
-                        "Element {} of the dimnames list must be a character vector.",
-                        i
+                        "Element {i} of the dimnames list must be a character vector."
                     ));
                 }
             }
@@ -2005,7 +1998,7 @@ impl RListMap<'_> {
     /// Find an RObject in the list based on its name.
     pub fn get(&mut self, name: &str) -> Result<&RObject, String> {
         let Some(index) = self.map.get(name) else {
-            return Err(format!("'{}' not found.", name));
+            return Err(format!("'{name}' not found."));
         };
         if !self.used[*index] {
             self.unused_counter -= 1;
@@ -2194,7 +2187,6 @@ impl RExternalPtr {
     ///
     /// This *method* moves a Rust object to an R external pointer and then, as far as Rust is concerned, leaks the memory.
     /// R will automatically free the memory when the associated R object is collected.
-    #[expect(clippy::mut_from_ref)]
     pub fn encode<'a, T>(x: T, tag: &str, pc: &'a Pc) -> &'a mut Self {
         Self::encode_full(x, tag.to_r(pc), true, pc)
     }
@@ -2222,7 +2214,7 @@ impl RExternalPtr {
                 unsafe extern "C" fn free<S>(sexp: SEXP) {
                     unsafe {
                         let addr = R_ExternalPtrAddr(sexp);
-                        if addr.as_ref().is_none() {
+                        if addr.is_null() {
                             return;
                         }
                         let _ = Box::from_raw(addr as *mut S);
@@ -2239,8 +2231,7 @@ impl RExternalPtr {
     /// Reconstitute an Rust object into an R external pointer.
     ///
     /// This *method* moves a Rust object to an R external pointer.
-    #[expect(clippy::mut_from_ref)]
-    pub fn reencode<'a, T, F: FnOnce(&RObject) -> T>(&mut self, f: F) {
+    pub fn reencode<T, F: FnOnce(&RObject) -> T>(&mut self, f: F) {
         unsafe {
             if self.is_null() {
                 let ptr = Box::into_raw(Box::new(f(self.tag())));
@@ -2249,7 +2240,7 @@ impl RExternalPtr {
                     unsafe extern "C" fn free<S>(sexp: SEXP) {
                         unsafe {
                             let addr = R_ExternalPtrAddr(sexp);
-                            if addr.as_ref().is_none() {
+                            if addr.is_null() {
                                 return;
                             }
                             let _ = Box::from_raw(addr as *mut S);
@@ -2283,7 +2274,7 @@ impl RExternalPtr {
         }
         unsafe {
             let addr = R_ExternalPtrAddr(self.sexp());
-            if addr.as_ref().is_none() {
+            if addr.is_null() {
                 return Err("External pointer was already decoded by value.");
             }
             R_ClearExternalPtr(self.sexp());
@@ -2431,7 +2422,6 @@ pub trait ToRRef<T: RObjectVariant> {
 /// Create an R object from a Rust object.
 pub trait ToRNoMut<T: RObjectVariant> {
     /// Convert to an R object.
-    #[expect(clippy::mut_from_ref)]
     fn to_r(self, pc: &Pc) -> &T;
 }
 
@@ -2578,10 +2568,10 @@ macro_rules! roxido_registration {
 #[macro_export]
 macro_rules! rprint {
     ($fmt_string:expr) => {
-        __private_print(format!($fmt_string).as_str(), false, true)
+        $crate::__private_print(format!($fmt_string).as_str(), false, true)
     };
     ($fmt_string:expr, $( $arg:expr ),* ) => {
-        __private_print(format!($fmt_string, $($arg),*).as_str(), false, true)
+        $crate::__private_print(format!($fmt_string, $($arg),*).as_str(), false, true)
     }
 }
 
@@ -2589,13 +2579,13 @@ macro_rules! rprint {
 #[macro_export]
 macro_rules! rprintln {
     () => {
-        __private_print("", true, true)
+        $crate::__private_print("", true, true)
     };
     ($fmt_string:expr) => {
-        __private_print(format!($fmt_string).as_str(), true, true)
+        $crate::__private_print(format!($fmt_string).as_str(), true, true)
     };
     ($fmt_string:expr, $( $arg:expr ),* ) => {
-        __private_print(format!($fmt_string, $($arg),*).as_str(), true, true)
+        $crate::__private_print(format!($fmt_string, $($arg),*).as_str(), true, true)
     }
 }
 
@@ -2603,10 +2593,10 @@ macro_rules! rprintln {
 #[macro_export]
 macro_rules! reprint {
     ($fmt_string:expr) => {
-        __private_print(format!($fmt_string).as_str(), false, false)
+        $crate::__private_print(format!($fmt_string).as_str(), false, false)
     };
     ($fmt_string:expr, $( $arg:expr ),* ) => {
-        __private_print(format!($fmt_string, $($arg),*).as_str(), false, false)
+        $crate::__private_print(format!($fmt_string, $($arg),*).as_str(), false, false)
     }
 }
 
@@ -2614,13 +2604,13 @@ macro_rules! reprint {
 #[macro_export]
 macro_rules! reprintln {
     () => {
-        __private_print("\n", false)
+        $crate::__private_print("", true, false)
     };
     ($fmt_string:expr) => {
-        __private_print(format!($fmt_string).as_str(), true, false)
+        $crate::__private_print(format!($fmt_string).as_str(), true, false)
     };
     ($fmt_string:expr, $( $arg:expr ),* ) => {
-        __private_print(format!($fmt_string, $($arg),*).as_str(), true, false)
+        $crate::__private_print(format!($fmt_string, $($arg),*).as_str(), true, false)
     }
 }
 
@@ -2633,7 +2623,6 @@ pub struct RStopHelper(pub String);
 ///
 /// Set the `RUST_BACKTRACE` environment variable to see a stack trace.
 #[macro_export]
-#[expect(clippy::crate_in_macro_def)]
 macro_rules! stop {
     () => {
         match std::env::var("RUST_BACKTRACE") {
@@ -2641,7 +2630,7 @@ macro_rules! stop {
                 panic!("Panic in stop!() due to RUST_BACKTRACE environment variable.")
             },
             Err(_) => {
-                std::panic::panic_any(RStopHelper(String::new()))
+                std::panic::panic_any($crate::RStopHelper(String::new()))
             }
         }
     };
@@ -2651,10 +2640,10 @@ macro_rules! stop {
                 let mut msg = String::new();
                 msg.push_str("Panic in stop!(...) due to RUST_BACKTRACE environment variable: ");
                 msg.push_str(&format!($fmt_string));
-                panic!("{}", msg);
+                panic!("{msg}");
             },
             Err(_) => {
-                std::panic::panic_any(RStopHelper(format!($fmt_string)))
+                std::panic::panic_any($crate::RStopHelper(format!($fmt_string)))
             }
         }
     };
@@ -2664,10 +2653,10 @@ macro_rules! stop {
                 let mut msg = String::new();
                 msg.push_str("Panic in stop!(...) due to RUST_BACKTRACE environment variable: ");
                 msg.push_str(&format!($fmt_string, $($arg),*));
-                panic!("{}", msg);
+                panic!("{msg}");
             },
             Err(_) => {
-                std::panic::panic_any(RStopHelper(format!($fmt_string, $($arg),*)))
+                std::panic::panic_any($crate::RStopHelper(format!($fmt_string, $($arg),*)))
             }
         }
     }
