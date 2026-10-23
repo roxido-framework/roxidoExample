@@ -9,6 +9,6 @@ Depends: R (>= 4.3)
 SystemRequirements: Cargo (Rust's package manager), rustc (>= 1.85.1)
 Encoding: UTF-8
 Roxygen: list(markdown = TRUE)
-Config/Roxido/TemplateVersion: 26.10.22.10.36
+Config/Roxido/TemplateVersion: 26.10.23.14.58
 Config/Roxido/MinCLIVersion: 0.8.2
 Config/roxygen2/version: 8.1.1
