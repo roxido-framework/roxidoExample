@@ -1,0 +1,3 @@
+# Keep development-only files out of the template archives used by 'roxido new' and rustfn.
+/dev export-ignore
+/.gitattributes export-ignore

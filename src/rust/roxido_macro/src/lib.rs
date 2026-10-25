@@ -28,10 +28,8 @@ use syn::ext::IdentExt;
 use syn::parse::Parser;
 use syn::{Token, parse_quote};
 
-// See https://doc.rust-lang.org/nomicon/unwinding.html
-//
-// Which says, in part, "There is an API called catch_unwind that enables catching a panic without spawning a thread. Still, we would encourage you to only do this sparingly. In particular, Rust's current unwinding implementation is heavily optimized for the "doesn't unwind" case. If a program doesn't unwind, there should be no runtime cost for the program being ready to unwind. As a consequence, actually unwinding will be more expensive than in e.g. Java. Don't build your programs to unwind under normal circumstances. Ideally, you should only panic for programming errors or extreme problems."
-
+/// Export a function to R, converting its result with `to_r`.
+/// Mark a `&mut` argument `#[unsafe(in_place)]` to mutate R's object without copy-on-write.
 #[proc_macro_attribute]
 pub fn roxido(attr: TokenStream, item: TokenStream) -> TokenStream {
     let options: Vec<_> = syn::punctuated::Punctuated::<NestedMeta, Token![,]>::parse_terminated
@@ -120,11 +118,6 @@ fn roxido_fn(options: Vec<NestedMeta>, item_fn: syn::ItemFn) -> TokenStream {
     for arg in &args {
         match arg {
             syn::FnArg::Typed(pat_type) => {
-                {
-                    let mut y = pat_type.clone();
-                    y.ty = Box::new(syn::parse_str::<syn::Type>("SEXP").unwrap());
-                    new_args.push(syn::FnArg::Typed(y));
-                }
                 let name = &pat_type.pat;
                 let name_as_string = quote!(#name).to_string();
                 if let Some(name_as_string) = name_as_string.strip_prefix("mut ") {
@@ -132,7 +125,33 @@ fn roxido_fn(options: Vec<NestedMeta>, item_fn: syn::ItemFn) -> TokenStream {
                         "'{name_as_string}' is marked as mutable, but arguments to 'roxido' functions cannot themselves be mutable."
                     );
                 }
+                let mut in_place = false;
+                {
+                    let mut y = pat_type.clone();
+                    y.ty = Box::new(syn::parse_str::<syn::Type>("SEXP").unwrap());
+                    y.attrs.retain(|attr| {
+                        let attr: String = quote!(#attr).to_string().split_whitespace().collect();
+                        match attr.as_str() {
+                            "#[unsafe(in_place)]" => {
+                                in_place = true;
+                                false
+                            }
+                            "#[in_place]" => panic!(
+                                "'{name_as_string}' must be marked '#[unsafe(in_place)]', not '#[in_place]'."
+                            ),
+                            _ => true,
+                        }
+                    });
+                    new_args.push(syn::FnArg::Typed(y));
+                }
                 let ty = &pat_type.ty;
+                if in_place
+                    && !matches!(ty.as_ref(), syn::Type::Reference(r) if r.mutability.is_some())
+                {
+                    panic!(
+                        "'{name_as_string}' is marked 'in_place', but only '&mut' arguments can be."
+                    );
+                }
                 let error_msg = || {
                     panic!(
                         concat!("'{}' is of type '{}', but e", TYPE_MESSAGE!()),
@@ -141,8 +160,10 @@ fn roxido_fn(options: Vec<NestedMeta>, item_fn: syn::ItemFn) -> TokenStream {
                     )
                 };
                 let as_robject = |vec: &mut Vec<_>, mutable: bool| {
-                    if mutable {
+                    if in_place {
                         vec.push(parse_quote! { let #name = unsafe { RObject::from_sexp_mut(#name, pc) }; });
+                    } else if mutable {
+                        vec.push(parse_quote! { let #name = unsafe { RObject::__private_from_arg_mut(#name, pc) }; });
                     } else {
                         vec.push(
                             parse_quote! { let #name = unsafe { RObject::from_sexp(#name, pc) }; },
@@ -326,6 +347,14 @@ fn roxido_fn(options: Vec<NestedMeta>, item_fn: syn::ItemFn) -> TokenStream {
                                     );
                                 }
                                 let path = quote!(#ty).to_string();
+                                if mutable
+                                    && !in_place
+                                    && matches!(path.as_str(), "RExternalPtr" | "RSymbol")
+                                {
+                                    panic!(
+                                        "'{name_as_string}' is '&mut {path}', which R cannot copy, so it must be marked '#[unsafe(in_place)]'."
+                                    );
+                                }
                                 match path.as_str() {
                                     "str" => {
                                         if mutable {
@@ -466,16 +495,19 @@ fn roxido_fn(options: Vec<NestedMeta>, item_fn: syn::ItemFn) -> TokenStream {
             _ => {}
         }
     }
-    // Write the function itself, wrapping the body in 'catch_unwind' to prevent unwinding into C.
-    // On panic, Rf_error() long jumps, but this is safe because catch_unwind has already run
-    // all Rust destructors and this is the last Rust stack frame.
+    // Write the function itself, wrapping the body in 'catch_unwind' so that a panic runs Rust
+    // destructors before Rf_error long-jumps into R.
     TokenStream::from(quote! {
         #[allow(clippy::useless_transmute)]
-        #[allow(clippy::not_unsafe_ptr_arg_deref)]
+        /// # Safety
+        /// Call from R's main thread after package initialization, with valid R arguments.
+        /// In-place arguments must follow roxido's aliasing rule.
+        #[deny(unsafe_op_in_unsafe_fn)]
         #[unsafe(no_mangle)]
-        pub extern "C" fn #name(#new_args) -> SEXP {
+        pub unsafe extern "C" fn #name(#new_args) -> SEXP {
             let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                let pc = &mut Pc::__private_new();
+                let __roxido_pc = unsafe { Pc::__private_new() };
+                let pc = &__roxido_pc;
                 #( #generated_statements )*
                 let mut f = || { #body };
                 f().to_r(pc).sexp()
@@ -483,13 +515,15 @@ fn roxido_fn(options: Vec<NestedMeta>, item_fn: syn::ItemFn) -> TokenStream {
             match result {
                 Ok(obj) => obj,
                 Err(ref payload) => {
-                    use crate::rbindings::*;
+                    use roxido::rbindings::*;
                     let msg = match payload.downcast_ref::<RStopHelper>() {
                         Some(x) => x.0.as_str(),
                         None => {
                             concat!("Panic in Rust function '", stringify!(#name),"' with 'roxido' attribute.")
                         }
                     };
+                    // Rf_mkCharLenCE would reject a NUL with an R error, leaking the payload.
+                    let msg = msg.split('\0').next().unwrap();
                     let len = msg.len();
                     let sexp = unsafe {
                         use std::convert::TryInto;

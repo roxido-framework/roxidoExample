@@ -24,6 +24,6 @@ fn myrnorm(n: SEXP, mean: SEXP, sd: SEXP) {
         }
         PutRNGstate();
         Rf_unprotect(1);
-        vec
+        RObject::from_sexp(vec, pc)
     }
 }

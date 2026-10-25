@@ -22,11 +22,11 @@ dependencies = [
 
 [[package]]
 name = "rbindings"
-version = "0.6.1"
+version = "0.7.0"
 
 [[package]]
 name = "roxido"
-version = "0.6.1"
+version = "0.7.0"
 dependencies = [
  "rbindings",
  "roxido_macro",
@@ -34,7 +34,7 @@ dependencies = [
 
 [[package]]
 name = "roxido_macro"
-version = "0.6.1"
+version = "0.7.0"
 dependencies = [
  "quote",
  "syn",

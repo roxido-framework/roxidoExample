@@ -127,15 +127,12 @@ fn lists(a1: &RList) {
         }
     };
     let my_list = RList::with_names(&["first.name", "last.name", "age"], pc);
-    let _ = my_list.set(0, "David".to_r(pc));
-    let _ = my_list.set(1, "Dahl".to_r(pc));
-    let _ = my_list.set(2, 10.to_r(pc));
+    let _ = my_list.set(0, "David");
+    let _ = my_list.set(1, "Dahl");
+    let _ = my_list.set(2, 10);
     let big_list = RList::new(100_000, pc);
     for i in 0..big_list.len() {
-        // Blows the stack!
-        // let _ = big_list.set(i, "David".to_r(pc));
-        // Does not blows the stack.
-        let _ = big_list.set_with_pc(i, |pc| "David".to_r(pc)); // Does not blow the stack.
+        let _ = big_list.set(i, "David");
     }
     big_list
 }
@@ -144,7 +141,7 @@ fn lists(a1: &RList) {
 // user and is inspired by the 'zero' function in "Section 5.11.1 Zero-finding"
 // of "Writing R Extensions". The body of functions with the 'roxido' attribute
 // are actually the body of closures. The return type of the closure can be
-// 'SEXP', 'RObject', or, indeed, anything for which an 'to_r' method is defined
+// an R object reference or anything for which a 'to_r' method is defined
 // and in scope. See the next function called 'create_r_objects_from_rust_types'
 // for a comprehensive list.  In the function below, the return type is 'f64'
 // and the 'to_r' is implicitly called after excuting the body.
@@ -153,10 +150,9 @@ fn zero(f: &RFunction, guess1: f64, guess2: f64, tol: f64) {
     if !tol.is_finite() || tol <= 0.0 {
         stop!("'tol' must be a strictly positive value.");
     }
-    let x_rval = 0.0.to_r(pc);
-    let mut g = |x: f64| {
-        x_rval.set(x);
-        let Ok(fx) = f.call1(x_rval, pc) else {
+    let g = |x: f64| {
+        // A new 'x' for each call, since the callback may keep it.
+        let Ok(fx) = (unsafe { f.call1(x.to_r(pc), pc) }) else {
             stop!("Error in function evaluation.");
         };
         let fx = fx
@@ -182,7 +178,8 @@ fn zero(f: &RFunction, guess1: f64, guess2: f64, tol: f64) {
     }
     loop {
         let xc = x0.midpoint(x1);
-        if (x0 - x1).abs() < tol {
+        // Stop if the interval cannot shrink further, which happens when 'tol' is very small.
+        if (x0 - x1).abs() < tol || xc == x0 || xc == x1 {
             return xc;
         }
         let fc = g(xc);
@@ -254,8 +251,8 @@ fn create_r_objects_from_rust_types() {
     let _x = array_bool.into_iter().map(|x| !x).to_r(pc);
     // Unit type
     let _x = ().to_r(pc);
-    // SEXP
-    let _x = R::null().sexp().to_r(pc);
+    // R's NULL object
+    let _x = R::null();
     // T: RObjectVariant
     let _x = 0_i32.to_r(pc).to_r(pc);
 }

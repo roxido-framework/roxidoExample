@@ -70,7 +70,7 @@ fn make_registration_code(src_path: &Path) -> Option<String> {
                     r#"use roxido::*;
 
 #[unsafe(no_mangle)]
-extern "C" fn R_init_{package_name}_rust(info: *mut rbindings::DllInfo) {{
+unsafe extern "C" fn R_init_{package_name}_rust(info: *mut rbindings::DllInfo) {{
     let mut call_routines = Vec::with_capacity({n_functions});
     let mut _names: Vec<std::ffi::CString> = Vec::with_capacity({n_functions});"#
                 ));
@@ -113,8 +113,8 @@ extern "C" fn R_init_{package_name}_rust(info: *mut rbindings::DllInfo) {{
         );
         rbindings::R_useDynamicSymbols(info, 0);
         rbindings::R_forceSymbols(info, 1);
+        roxido::__private_init();
     }
-    roxido::__private_set_custom_panic_hook();
 }"#,
                 );
                 Some(snippet)
