@@ -21,8 +21,9 @@
 //! # Example
 //!
 //! This example function takes two R vectors and computes the convolution
-//! of them. Any function with the roxido attribute must return an [RObject],
-//! and may only take parameters of [RObject] type.
+//! of them. The body of a function with the roxido attribute may return any value
+//! with a `to_r` method, and its parameters may be references to R objects or Rust
+//! values converted from them.
 //!
 //! ```
 //! use roxido::*;
@@ -104,6 +105,9 @@
 //! copy, so every R reference to the object sees the change, including literals in compiled R
 //! code. R cannot copy external pointers, symbols, or environments, so `&mut` access to them
 //! requires `#[unsafe(in_place)]`; [RList::get_mut] and [RObjectVariant::clone] reject them.
+//! An in-place argument raises an R error if it is `NULL` or the same object as another argument
+//! that is borrowed. This does not detect an object that is reachable from another argument, such
+//! as a list element or an attribute, so the aliasing rule below still applies.
 //!
 //! ## Aliasing
 //!
@@ -244,11 +248,24 @@ pub trait RObjectVariant: private::Sealed + Sized {
         }
     }
 
-    /// Convert a Rust value to a new R object and set it as an attribute.
-    fn set_attribute<T: RObjectVariant>(&mut self, which: &RSymbol, value: impl ToR<T>) {
+    /// Convert a Rust value, such as a scalar, slice, or iterator, to a new R object and set it as
+    /// an attribute.
+    fn set_attribute<T: RObjectVariant, M>(&mut self, which: &RSymbol, value: impl IntoR<T, M>) {
+        self.set_attribute_with_pc(which, |pc| value.into_r(pc));
+    }
+
+    /// Set as an attribute the object that `x` builds with a temporary protection counter.
+    ///
+    /// `x` can return only an object it creates from the counter, or a `'static` object such as
+    /// `NULL` or a symbol, so nothing else references it.
+    fn set_attribute_with_pc<T: RObjectVariant, F: FnOnce(&Pc) -> &T>(
+        &mut self,
+        which: &RSymbol,
+        x: F,
+    ) {
         unsafe {
             let pc = Pc::__private_new();
-            self.set_attribute_object(which, value.to_r(&pc));
+            Rf_setAttrib(self.sexp(), which.sexp(), x(&pc).sexp());
         }
     }
 
@@ -383,6 +400,15 @@ pub trait RVectorConstructors<T> {
     #[expect(clippy::mut_from_ref)]
     fn new(length: usize, pc: &Pc) -> &mut Self;
 
+    /// Allocate a vector without initializing its data, which saves time when every element is
+    /// about to be written, for example by worker threads. Strings are still initialized to empty.
+    ///
+    /// # Safety
+    /// Write every element, for example through `slice_mut`, before reading any of them and before
+    /// R can see the vector, such as by returning it.
+    #[expect(clippy::mut_from_ref)]
+    unsafe fn new_uninit(length: usize, pc: &Pc) -> &mut Self;
+
     #[expect(clippy::mut_from_ref)]
     fn from_value(value: T, length: usize, pc: &Pc) -> &mut Self;
 
@@ -399,6 +425,15 @@ pub trait RMatrixConstructors<T> {
     #[expect(clippy::mut_from_ref)]
     fn new(nrow: usize, ncol: usize, pc: &Pc) -> &mut Self;
 
+    /// Allocate a matrix without initializing its data, which saves time when every element is
+    /// about to be written, for example by worker threads.
+    ///
+    /// # Safety
+    /// Write every element, for example through `slice_mut`, before reading any of them and before
+    /// R can see the matrix, such as by returning it.
+    #[expect(clippy::mut_from_ref)]
+    unsafe fn new_uninit(nrow: usize, ncol: usize, pc: &Pc) -> &mut Self;
+
     #[expect(clippy::mut_from_ref)]
     fn from_value(value: T, nrow: usize, ncol: usize, pc: &Pc) -> &mut Self;
 }
@@ -409,20 +444,67 @@ pub trait RArrayConstructors<T> {
     #[expect(clippy::mut_from_ref)]
     fn new<'a>(dim: &[usize], pc: &'a Pc) -> &'a mut Self;
 
+    /// Allocate an array without initializing its data, which saves time when every element is
+    /// about to be written, for example by worker threads.
+    ///
+    /// # Safety
+    /// Write every element, for example through `slice_mut`, before reading any of them and before
+    /// R can see the array, such as by returning it.
+    #[expect(clippy::mut_from_ref)]
+    unsafe fn new_uninit<'a>(dim: &[usize], pc: &'a Pc) -> &'a mut Self;
+
     #[expect(clippy::mut_from_ref)]
     fn from_value<'a>(value: T, dim: &[usize], pc: &'a Pc) -> &'a mut Self;
 }
 
 static TOO_LONG: &str = "Could not fit usize into i32.";
 
+// Convert a double to an integer type, requiring a whole number within the type's range.
+fn whole_number<T: TryFrom<i128>>(y: f64) -> Result<T, &'static str> {
+    if R::is_na_f64(y) {
+        Err("Equals R's NA for doubles.")
+    } else if y.is_nan() {
+        Err("Equals R's NaN.")
+    } else if y.is_finite() && y.fract() != 0.0 {
+        Err("Not a whole number.")
+    } else {
+        // A whole double converts to i128 exactly, or saturates if it is too large for any type.
+        T::try_from(y as i128).map_err(|_| {
+            if y >= 0.0 {
+                "Greater than the maximum value."
+            } else if T::try_from(-1).is_err() {
+                "Negative value not expected."
+            } else {
+                "Less than the minimum value."
+            }
+        })
+    }
+}
+
+// Describe an object that R cannot copy, or return `None` if R can copy it.
+// `sexp` must be a live R object on R's main thread.
+unsafe fn uncopyable_description(sexp: SEXP) -> Option<&'static str> {
+    match unsafe { TYPEOF(sexp) } as u32 {
+        NILSXP => Some("NULL"),
+        SYMSXP => Some("a symbol"),
+        ENVSXP => Some("an environment"),
+        SPECIALSXP | BUILTINSXP => Some("a primitive function"),
+        EXTPTRSXP => Some("an external pointer"),
+        BCODESXP => Some("byte code"),
+        WEAKREFSXP => Some("a weak reference"),
+        CHARSXP => Some("an element of a character vector"),
+        PROMSXP => Some("a promise"),
+        _ => None,
+    }
+}
+
 // `sexp` must be a live R object on R's main thread.
 unsafe fn check_mutable(sexp: SEXP) -> Result<(), &'static str> {
-    match unsafe { TYPEOF(sexp) } as u32 {
-        NILSXP | SYMSXP | ENVSXP | SPECIALSXP | BUILTINSXP | EXTPTRSXP | BCODESXP | WEAKREFSXP
-        | CHARSXP | PROMSXP => {
+    match unsafe { uncopyable_description(sexp) } {
+        Some(_) => {
             Err("R cannot copy this object for mutable access; use explicit unsafe borrowing.")
         }
-        _ => Ok(()),
+        None => Ok(()),
     }
 }
 
@@ -475,9 +557,21 @@ fn charsxp_from_str(x: &str) -> SEXP {
     }
 }
 
+// Read an element of a character vector as UTF-8, as R recommends for C code.
 fn charsxp_as_str<T>(sexp: SEXP, _anchor: &T) -> Result<&str, &'static str> {
-    let c_str = unsafe { CStr::from_ptr(R_CHAR(sexp) as *const c_char) };
-    c_str.to_str().map_err(|_| "Not valid UTF8.")
+    unsafe {
+        if sexp == R_NaString {
+            return Err("Equals R's NA for strings.");
+        }
+        // R raises an error when asked to translate a string with "bytes" encoding.
+        if Rf_getCharCE(sexp) == cetype_t_CE_BYTES {
+            return Err("Has \"bytes\" encoding, which cannot be converted to UTF-8.");
+        }
+        // ASCII and UTF-8 strings are returned as they are. Others, such as latin1, are translated
+        // into memory that R releases when the `.Call` returns.
+        let c_str = CStr::from_ptr(Rf_translateCharUTF8(sexp));
+        c_str.to_str().map_err(|_| "Not valid UTF-8.")
+    }
 }
 
 fn dimnames_to_r<'a>(dimnames: &[Option<&[&str]>], pc: &'a Pc) -> &'a RList {
@@ -672,7 +766,7 @@ impl R {
         Rboolean_TRUE
     }
 
-    /// Returns R's `TRUE` value for storage mode "integer".
+    /// Returns R's `FALSE` value for storage mode "integer".
     #[expect(non_snake_case)]
     pub fn FALSE() -> i32 {
         Rboolean_FALSE
@@ -854,15 +948,45 @@ impl RObject {
     /// Mutably borrow an argument from R, first copying it if it is referenced, as R does.
     #[doc(hidden)]
     #[expect(clippy::mut_from_ref)]
-    pub unsafe fn __private_from_arg_mut(sexp: SEXP, pc: &Pc) -> &mut Self {
+    pub unsafe fn __private_from_arg_mut<'a>(sexp: SEXP, name: &str, pc: &'a Pc) -> &'a mut Self {
         unsafe {
-            check_mutable(sexp).stop();
+            if let Some(description) = uncopyable_description(sexp) {
+                crate::stop!(
+                    "'{name}' is expected to be an object that R can copy, but it is {description}."
+                );
+            }
             // `.Call` does not count its own reference, so any reference may be the caller's.
             if NO_REFERENCES(sexp) == 0 {
-                pc.protect(duplicate_for_mutation(sexp, true).stop())
-                    .transmute_mut(pc)
+                let Ok(copy) = duplicate_for_mutation(sexp, true) else {
+                    crate::stop!("'{name}' is expected to be an object that R can copy.");
+                };
+                pc.protect(copy).transmute_mut(pc)
             } else {
                 sexp.transmute_mut(pc)
+            }
+        }
+    }
+
+    /// Check an argument that is modified in place: it may not be the same object as another
+    /// argument that is borrowed, nor `NULL` unless it is optional.
+    #[doc(hidden)]
+    pub unsafe fn __private_check_in_place(
+        sexp: SEXP,
+        name: &str,
+        optional: bool,
+        others: &[(SEXP, &str)],
+    ) {
+        if unsafe { Rf_isNull(sexp) } != 0 {
+            if optional {
+                return;
+            }
+            crate::stop!(
+                "'{name}' is expected to be an object that can be modified in place, but it is NULL."
+            );
+        }
+        for (other, other_name) in others {
+            if *other == sexp {
+                crate::stop!("'{name}' and '{other_name}' are expected to be different objects.");
             }
         }
     }
@@ -878,7 +1002,7 @@ impl RObject {
         if s.is_scalar() {
             Ok(unsafe { self.transmute() })
         } else {
-            Err("Not a vector.")
+            Err("Not a scalar.")
         }
     }
 
@@ -910,7 +1034,7 @@ impl RObject {
         }
     }
 
-    /// Attempts to recharacterize as a reference to an ]`RMatrix`].
+    /// Attempts to recharacterize as a reference to an [`RMatrix`].
     pub fn as_matrix(&self) -> Result<&RMatrix, &'static str> {
         if self.is_matrix() {
             Ok(unsafe { self.transmute() })
@@ -933,7 +1057,7 @@ impl RObject {
         if self.is_array() {
             Ok(unsafe { self.transmute() })
         } else {
-            Err("Not a vector.")
+            Err("Not an array.")
         }
     }
 
@@ -942,7 +1066,7 @@ impl RObject {
         if self.is_array() {
             Ok(unsafe { self.transmute_mut() })
         } else {
-            Err("Not a vector.")
+            Err("Not an array.")
         }
     }
 
@@ -1023,7 +1147,7 @@ impl RObject {
         if self.is_symbol() {
             Ok(unsafe { self.transmute() })
         } else {
-            Err("Not an external pointer.")
+            Err("Not a symbol.")
         }
     }
 
@@ -1032,7 +1156,7 @@ impl RObject {
         if self.is_symbol() {
             Ok(unsafe { self.transmute_mut() })
         } else {
-            Err("Not an external pointer.")
+            Err("Not a symbol.")
         }
     }
 
@@ -1071,8 +1195,7 @@ impl RObject {
         if unsafe { TYPEOF(self.sexp()) } != VECSXP as i32 {
             return false;
         }
-        let cstr = CString::new("data.frame").unwrap();
-        unsafe { Rf_inherits(self.sexp(), cstr.as_ptr()) != 0 }
+        unsafe { Rf_inherits(self.sexp(), c"data.frame".as_ptr()) != 0 }
     }
 
     /// Check if it can be interpreted as a function in R.
@@ -1152,11 +1275,12 @@ impl RFunction {
         let expression = unsafe { pc.protect(expression) };
         // Quote arguments that R would evaluate, so R passes them as data.
         unsafe {
+            // The base function 'quote' is always reachable, so it needs no protection.
+            let quote = Rf_eval(Rf_install(c"quote".as_ptr()), R_BaseEnv);
             let mut cell = CDR(expression);
             while cell != R_NilValue {
                 let arg = CAR(cell);
                 if matches!(TYPEOF(arg) as u32, SYMSXP | LANGSXP | PROMSXP | BCODESXP) {
-                    let quote = Rf_eval(Rf_install(c"quote".as_ptr()), R_BaseEnv);
                     SETCAR(cell, Rf_lang2(quote, arg));
                 }
                 cell = CDR(cell);
@@ -1284,12 +1408,12 @@ impl RFunction {
 }
 
 impl<T> RScalar<T> {
-    /// Attempts to recharacterize as a reference to an [`RVector`].
+    /// Recharacterize as a reference to an [`RVector`].
     pub fn as_vector(&self) -> &RVector<T> {
         unsafe { self.transmute() }
     }
 
-    /// Attempts to recharacterize as a mutable reference to an [`RVector`].
+    /// Recharacterize as a mutable reference to an [`RVector`].
     pub fn as_vector_mut(&mut self) -> &mut RVector<T> {
         unsafe { self.transmute_mut() }
     }
@@ -1299,27 +1423,21 @@ impl<T> RScalar<T> {
         unsafe { Rf_asReal(self.sexp()) }
     }
 
-    /// Interpret as an `i32`.
+    /// Interpret as an `i32`. A double must be a whole number.
     pub fn i32(&self) -> Result<i32, &'static str> {
         if self.is_i32() {
             let x = unsafe { Rf_asInteger(self.sexp()) };
             if x == i32::MIN {
-                Err("i32 equals R's NA for integers.")
+                Err("Equals R's NA for integers.")
             } else {
                 Ok(x)
             }
         } else if self.is_f64() {
             let y = unsafe { Rf_asReal(self.sexp()) };
-            if y > f64::from(i32::MAX) {
-                Err("Greater than maximum integer value.")
-            } else if y < f64::from(i32::MIN) {
-                Err("Less than minimum integer value.")
-            } else if y == f64::from(i32::MIN) {
-                Err("Equals R's NA for integers.")
-            } else if y.is_nan() {
-                Err("Equals R's NaN.")
-            } else {
-                Ok(y.round() as i32)
+            match whole_number(y) {
+                // R uses i32::MIN for NA, so it is not a valid value.
+                Ok(i32::MIN) => Err("Less than the minimum value."),
+                result => result,
             }
         } else if self.is_u8() {
             Ok(unsafe { Rf_asInteger(self.sexp()) })
@@ -1335,7 +1453,7 @@ impl<T> RScalar<T> {
         }
     }
 
-    /// Attempt to interpret as an `usize`.
+    /// Attempt to interpret as a `usize`. A double must be a whole number.
     pub fn usize(&self) -> Result<usize, &'static str> {
         if self.is_i32() {
             let x = unsafe { Rf_asInteger(self.sexp()) };
@@ -1348,16 +1466,7 @@ impl<T> RScalar<T> {
             }
         } else if self.is_f64() {
             let y = unsafe { Rf_asReal(self.sexp()) };
-            if y < 0.0 {
-                Err("Negative value not expected.")
-            } else {
-                let z = y as usize;
-                if z as f64 == y {
-                    Ok(z)
-                } else {
-                    Err("Cannot convert to usize.")
-                }
-            }
+            whole_number(y)
         } else if self.is_u8() {
             let x = unsafe { Rf_asInteger(self.sexp()) };
             usize::try_from(x).map_err(|_| "Cannot convert to usize.")
@@ -1373,23 +1482,18 @@ impl<T> RScalar<T> {
         }
     }
 
-    /// Attempt to interpret as an `u8`.
+    /// Attempt to interpret as a `u8`. A double must be a whole number.
     pub fn u8(&self) -> Result<u8, &'static str> {
         if self.is_i32() {
             let x = unsafe { Rf_asInteger(self.sexp()) };
-            u8::try_from(x).map_err(|_| "Cannot convert to u8.")
+            if x == i32::MIN {
+                Err("Equals R's NA for integers.")
+            } else {
+                u8::try_from(x).map_err(|_| "Cannot convert to u8.")
+            }
         } else if self.is_f64() {
             let y = unsafe { Rf_asReal(self.sexp()) };
-            if y < 0.0 {
-                Err("Negative value not expected.")
-            } else {
-                let z = y as u8;
-                if z as f64 == y {
-                    Ok(z)
-                } else {
-                    Err("Cannot convert to u8.")
-                }
-            }
+            whole_number(y)
         } else if self.is_u8() {
             let x = unsafe { Rf_asInteger(self.sexp()) };
             u8::try_from(x).map_err(|_| "Cannot convert to u8.")
@@ -1405,7 +1509,7 @@ impl<T> RScalar<T> {
         }
     }
 
-    /// Attempt to interpret as an `bool`.
+    /// Attempt to interpret as a `bool`.
     pub fn bool(&self) -> Result<bool, &'static str> {
         if self.is_i32() {
             let x = unsafe { Rf_asInteger(self.sexp()) };
@@ -1437,10 +1541,11 @@ impl<T> RScalar<T> {
         }
     }
 
-    /// Attempt to interpret as an a string.
-    pub fn str<'a>(&'a self, pc: &'a Pc) -> &'a str {
-        let s = self.to_char(pc);
-        s.get().unwrap()
+    /// Attempt to interpret as a string, converting from other storage modes as R does.
+    ///
+    /// An error is returned for `NA` and for strings that cannot be represented in UTF-8.
+    pub fn str<'a>(&'a self, pc: &'a Pc) -> Result<&'a str, &'static str> {
+        self.to_char(pc).get()
     }
 
     /// Check if RObject can be interpreted as an NA value in R.
@@ -1543,7 +1648,7 @@ macro_rules! rconvertable {
                 }
             }
 
-            /// Checks if its using R's storage model "double".
+            /// Checks whether it uses R's storage mode "double".
             pub fn is_f64(&self) -> bool {
                 unsafe { Rf_isReal(self.sexp()) != 0 }
             }
@@ -1584,7 +1689,7 @@ macro_rules! rconvertable {
                 }
             }
 
-            /// Checks if its using R's storage model "integer".
+            /// Checks whether it uses R's storage mode "integer".
             pub fn is_i32(&self) -> bool {
                 unsafe { Rf_isInteger(self.sexp()) != 0 }
             }
@@ -1625,7 +1730,7 @@ macro_rules! rconvertable {
                 }
             }
 
-            /// Checks if its using R's storage model "raw".
+            /// Checks whether it uses R's storage mode "raw".
             pub fn is_u8(&self) -> bool {
                 unsafe { TYPEOF(self.sexp()) == RAWSXP as i32 }
             }
@@ -1666,7 +1771,7 @@ macro_rules! rconvertable {
                 }
             }
 
-            /// Checks if its using R's storage model "logical".
+            /// Checks whether it uses R's storage mode "logical".
             pub fn is_bool(&self) -> bool {
                 unsafe { Rf_isLogical(self.sexp()) != 0 }
             }
@@ -1707,7 +1812,7 @@ macro_rules! rconvertable {
                 }
             }
 
-            /// Checks if its using R's storage model "character".
+            /// Checks whether it uses R's storage mode "character".
             pub fn is_char(&self) -> bool {
                 unsafe { Rf_isString(self.sexp()) != 0 }
             }
@@ -1810,6 +1915,8 @@ impl RGetSet0<bool> for RScalar<bool> {
 
 impl RScalar<char> {
     /// Get the value of a scalar.
+    ///
+    /// An error is returned for `NA` and for strings that cannot be represented in UTF-8.
     pub fn get(&self) -> Result<&str, &'static str> {
         charsxp_as_str(unsafe { STRING_ELT(self.sexp(), 0) }, self)
     }
@@ -1870,6 +1977,15 @@ macro_rules! rvector {
         impl RVectorConstructors<$tipe> for RVector<$tipe> {
             fn new(length: usize, pc: &Pc) -> &mut Self {
                 Self::from_value(0 as $tipe, length, pc)
+            }
+
+            unsafe fn new_uninit(length: usize, pc: &Pc) -> &mut Self {
+                unsafe {
+                    pc.protect_and_transmute(Rf_allocVector(
+                        $code,
+                        length.try_into().stop_str(TOO_LONG),
+                    ))
+                }
             }
 
             fn from_value(value: $tipe, length: usize, pc: &Pc) -> &mut Self {
@@ -1936,7 +2052,7 @@ impl RFromIterator<bool> for RVector<bool> {
 }
 
 impl RGetSet1<bool> for RVector<bool> {
-    /// Get the value at a certain index in an $tipe RVector.
+    /// Get the value at a certain index.
     fn get(&self, index: usize) -> Result<bool, &'static str> {
         if index < self.len() {
             let value = unsafe { LOGICAL_ELT(self.sexp(), index.try_into().unwrap()) };
@@ -1946,7 +2062,7 @@ impl RGetSet1<bool> for RVector<bool> {
         }
     }
 
-    /// Set the value at a certain index in an $tipe RVector.
+    /// Set the value at a certain index.
     fn set(&mut self, index: usize, value: bool) -> Result<(), &'static str> {
         if index < self.len() {
             unsafe {
@@ -1960,7 +2076,7 @@ impl RGetSet1<bool> for RVector<bool> {
 }
 
 impl RVector<bool> {
-    /// Get the value at a certain index in an $tipe RVector.
+    /// Get the value at a certain index as R stores it in an `i32`.
     pub fn get_i32(&self, index: usize) -> Result<i32, &'static str> {
         if index < self.len() {
             Ok(unsafe { LOGICAL_ELT(self.sexp(), index.try_into().unwrap()) })
@@ -1969,7 +2085,7 @@ impl RVector<bool> {
         }
     }
 
-    /// Set the value at a certain index in an $tipe RVector.
+    /// Set the value at a certain index as R stores it in an `i32`.
     pub fn set_i32(&mut self, index: usize, value: i32) -> Result<(), &'static str> {
         if index < self.len() {
             unsafe { SET_LOGICAL_ELT(self.sexp(), index.try_into().unwrap(), value) };
@@ -1983,6 +2099,12 @@ impl RVector<bool> {
 impl RVectorConstructors<bool> for RVector<bool> {
     fn new(length: usize, pc: &Pc) -> &mut Self {
         Self::from_value(false, length, pc)
+    }
+
+    unsafe fn new_uninit(length: usize, pc: &Pc) -> &mut Self {
+        unsafe {
+            pc.protect_and_transmute(Rf_allocVector(LGLSXP, length.try_into().stop_str(TOO_LONG)))
+        }
     }
 
     fn from_value(value: bool, length: usize, pc: &Pc) -> &mut Self {
@@ -2004,9 +2126,20 @@ impl RVectorConstructors<bool> for RVector<bool> {
 
 impl RVector<char> {
     /// Get the value at a certain index in the R object.
+    ///
+    /// An error is returned for `NA` and for strings that cannot be represented in UTF-8.
     pub fn get(&self, index: usize) -> Result<&str, &'static str> {
         if index < self.len() {
             self.get_unchecked(index)
+        } else {
+            Err("Index out of bounds.")
+        }
+    }
+
+    /// Check whether the value at a certain index is `NA`.
+    pub fn is_na(&self, index: usize) -> Result<bool, &'static str> {
+        if index < self.len() {
+            Ok(unsafe { STRING_ELT(self.sexp(), index.try_into().unwrap()) == R_NaString })
         } else {
             Err("Index out of bounds.")
         }
@@ -2041,6 +2174,11 @@ impl RVectorConstructors<&str> for RVector<char> {
         }
     }
 
+    // R always initializes the elements of a character vector.
+    unsafe fn new_uninit(length: usize, pc: &Pc) -> &mut Self {
+        Self::new(length, pc)
+    }
+
     fn from_value<'a>(value: &str, length: usize, pc: &'a Pc) -> &'a mut Self {
         let length_i32 = length.try_into().stop_str(TOO_LONG);
         let vec = unsafe { pc.protect(Rf_allocVector(STRSXP, length_i32)) };
@@ -2073,7 +2211,7 @@ impl RVectorConstructors<&str> for RVector<char> {
 macro_rules! rmatrix {
     ($tipe:ty, $code:expr, $ptr:expr, $get:expr, $set:expr) => {
         impl RGetSet2<$tipe> for RMatrix<$tipe> {
-            /// Get the value at a certain index in an $tipe RMatrix.
+            /// Get the value at a certain row and column.
             fn get(&self, row: usize, col: usize) -> Result<$tipe, &'static str> {
                 let index = self.index(row, col, None);
                 if index < self.len() {
@@ -2083,7 +2221,7 @@ macro_rules! rmatrix {
                 }
             }
 
-            /// Set the value at a certain index in an $tipe RMatrix.
+            /// Set the value at a certain row and column.
             fn set(&mut self, row: usize, col: usize, value: $tipe) -> Result<(), &'static str> {
                 let index = self.index(row, col, None);
                 if index < self.len() {
@@ -2098,6 +2236,16 @@ macro_rules! rmatrix {
         impl RMatrixConstructors<$tipe> for RMatrix<$tipe> {
             fn new(nrow: usize, ncol: usize, pc: &Pc) -> &mut Self {
                 Self::from_value(0 as $tipe, nrow, ncol, pc)
+            }
+
+            unsafe fn new_uninit(nrow: usize, ncol: usize, pc: &Pc) -> &mut Self {
+                unsafe {
+                    pc.protect_and_transmute(Rf_allocMatrix(
+                        $code,
+                        nrow.try_into().stop_str(TOO_LONG),
+                        ncol.try_into().stop_str(TOO_LONG),
+                    ))
+                }
             }
 
             fn from_value(value: $tipe, nrow: usize, ncol: usize, pc: &Pc) -> &mut Self {
@@ -2155,7 +2303,7 @@ impl<T> RMatrix<T> {
         }
     }
 
-    /// Get the value at a certain row and column in the R matrix.
+    /// Get the linear index of a certain row and column.
     pub fn index(&self, row: usize, col: usize, nrow: Option<usize>) -> usize {
         let nrow = nrow.unwrap_or_else(|| self.nrow());
         nrow * col + row
@@ -2220,7 +2368,7 @@ impl<T> RMatrix<T> {
 macro_rules! rarray {
     ($tipe:ty, $code:expr, $ptr:expr, $get:expr, $set:expr) => {
         impl RGetSetN<$tipe> for RArray<$tipe> {
-            /// Get the value at a certain index in an $tipe RArray.
+            /// Get the value at a certain index.
             fn get(&self, index: &[usize]) -> Result<$tipe, &'static str> {
                 let index = self.index(index, None);
                 if index < self.len() {
@@ -2229,7 +2377,7 @@ macro_rules! rarray {
                     Err("Index out of bounds.")
                 }
             }
-            /// Set the value at a certain index in an $tipe RArray.
+            /// Set the value at a certain index.
             fn set(&mut self, index: &[usize], value: $tipe) -> Result<(), &'static str> {
                 let index = self.index(index, None);
                 if index < self.len() {
@@ -2244,6 +2392,15 @@ macro_rules! rarray {
         impl RArrayConstructors<$tipe> for RArray<$tipe> {
             fn new<'a>(dim: &[usize], pc: &'a Pc) -> &'a mut Self {
                 Self::from_value(0 as $tipe, dim, pc)
+            }
+
+            unsafe fn new_uninit<'a>(dim: &[usize], pc: &'a Pc) -> &'a mut Self {
+                let dim = dim
+                    .iter()
+                    .map(|x| i32::try_from(*x).stop_str(TOO_LONG))
+                    .to_r(pc)
+                    .sexp();
+                unsafe { pc.protect_and_transmute(Rf_allocArray($code, dim)) }
             }
 
             fn from_value<'a>(value: $tipe, dim: &[usize], pc: &'a Pc) -> &'a mut Self {
@@ -2267,7 +2424,7 @@ rarray!(i32, INTSXP, INTEGER, INTEGER_ELT, SET_INTEGER_ELT);
 rarray!(u8, RAWSXP, RAW, RAW_ELT, SET_RAW_ELT);
 
 impl<T> RArray<T> {
-    /// Return the dimensions of the RMatrix.
+    /// Return the dimensions of the RArray.
     pub fn dim(&self) -> Vec<usize> {
         let d: &RVector<i32> = unsafe { Rf_getAttrib(self.sexp(), R_DimSymbol).transmute(self) };
         d.slice().iter().map(|&x| x.try_into().unwrap()).collect()
@@ -2281,7 +2438,7 @@ impl<T> RArray<T> {
         }
     }
 
-    /// Get the index of a value based on the row and column number.
+    /// Get the linear index of a value from its position in each dimension.
     pub fn index(&self, index: &[usize], dim: Option<&[usize]>) -> usize {
         let mut dim_holder: Vec<_> = vec![];
         let dim = dim.unwrap_or_else(|| {
@@ -2393,13 +2550,11 @@ impl RListMap<'_> {
 
     /// Return the names of all unused RObjects in the map.
     pub fn unused_elements(&self) -> Vec<&str> {
-        let result = self
-            .map
-            .iter()
-            .filter(|(_, index)| !self.used[**index])
-            .map(|(name, _)| *name)
-            .take(self.unused_counter);
-        result.collect()
+        let names = self.robj.get_names();
+        (0..self.used.len())
+            .filter(|&index| !self.used[index])
+            .map(|index| names.get(index).unwrap_or("NA"))
+            .collect()
     }
 }
 
@@ -2449,13 +2604,14 @@ macro_rules! rlistlike {
                 }
             }
 
-            /// Convert a Rust value to a new R object and store it at an index.
-            pub fn set<T: RObjectVariant>(
+            /// Convert a Rust value, such as a scalar, slice, or iterator, to a new R object and
+            /// store it at an index.
+            pub fn set<T: RObjectVariant, M>(
                 &mut self,
                 index: usize,
-                value: impl ToR<T>,
+                value: impl IntoR<T, M>,
             ) -> Result<(), &'static str> {
-                self.set_with_pc(index, |pc| value.to_r(pc))
+                self.set_with_pc(index, |pc| value.into_r(pc))
             }
 
             /// Store an existing R object at an index.
@@ -2508,7 +2664,7 @@ macro_rules! rlistlike {
             pub fn get_by_key(&self, key: impl AsRef<str>) -> Result<&RObject, String> {
                 let names = self.get_names();
                 for i in 0..names.len() {
-                    if names.get(i).unwrap() == key.as_ref() {
+                    if names.get(i) == Ok(key.as_ref()) {
                         return Ok(self.get(i)?);
                     }
                 }
@@ -2519,7 +2675,7 @@ macro_rules! rlistlike {
             pub fn get_mut_by_key(&mut self, key: impl AsRef<str>) -> Result<&mut RObject, String> {
                 let names = self.get_names();
                 for i in 0..names.len() {
-                    if names.get(i).unwrap() == key.as_ref() {
+                    if names.get(i) == Ok(key.as_ref()) {
                         return Ok(self.get_mut(i)?);
                     }
                 }
@@ -2536,7 +2692,10 @@ macro_rules! rlistlike {
                 let names = self.get_names();
                 let len = names.len();
                 for i in 0..len {
-                    map.insert(names.get(i).unwrap(), i);
+                    // An element whose name is NA cannot be looked up, so it stays unused.
+                    if let Ok(name) = names.get(i) {
+                        map.insert(name, i);
+                    }
                 }
                 RListMap {
                     unused_counter: len,
@@ -2754,7 +2913,7 @@ impl RExternalPtr {
 
     /// Get tag for an R external pointer.
     ///
-    /// This method gets the tag associated with an R external pointer, which was set by [`RObject::as_external_ptr`].
+    /// This method gets the tag associated with an R external pointer, which was set by [`Self::encode`] or [`Self::encode_full`].
     ///
     pub fn tag(&self) -> &RObject {
         unsafe { R_ExternalPtrTag(self.sexp()).transmute(self) }
@@ -2762,7 +2921,7 @@ impl RExternalPtr {
 
     /// Get &str tag for an R external pointer.
     ///
-    /// This method gets the &str tag associated with an R external pointer, which was set by [`RObject::as_external_ptr`].
+    /// This method gets the &str tag associated with an R external pointer, which was set by [`Self::encode`] or [`Self::encode_full`].
     /// It turns the empty string "" if the tag is not a character vector of length one.
     ///
     pub fn tag_str(&self) -> &str {
@@ -2788,6 +2947,11 @@ pub trait FromR<T: RObjectVariant, U> {
 }
 
 /// Create a mutable reference to an R object from a Rust object.
+#[diagnostic::on_unimplemented(
+    message = "`{Self}` is not a Rust value that can be converted to a new R object",
+    label = "expected a Rust value, such as a number, a string, or a slice",
+    note = "to store an R object, build it inside `set_with_pc` or `set_attribute_with_pc`"
+)]
 pub trait ToR<T: RObjectVariant> {
     /// Create a new R object.
     #[expect(clippy::mut_from_ref)]
@@ -2806,6 +2970,49 @@ pub trait ToR2<T: RObjectVariant> {
     /// Convert to an R object.
     #[expect(clippy::mut_from_ref)]
     fn to_r(self, pc: &Pc) -> &mut T;
+}
+
+/// A Rust value that converts to a new R object through [`ToR`], [`ToR1`], or [`ToR2`].
+///
+/// This lets one method accept all three. `Marker` only records which conversion applies and is
+/// always inferred.
+#[diagnostic::on_unimplemented(
+    message = "`{Self}` is not a Rust value that can be converted to a new R object",
+    label = "expected a Rust value, such as a number, a string, a slice, or an iterator",
+    note = "if this is the result of `to_r`, pass the Rust value itself",
+    note = "to store an R object, build it inside `set_with_pc` or `set_attribute_with_pc`"
+)]
+pub trait IntoR<T: RObjectVariant, Marker> {
+    /// Convert to an R object.
+    #[expect(clippy::mut_from_ref)]
+    fn into_r(self, pc: &Pc) -> &mut T;
+}
+
+#[doc(hidden)]
+pub struct ViaToR;
+
+#[doc(hidden)]
+pub struct ViaToR1;
+
+#[doc(hidden)]
+pub struct ViaToR2;
+
+impl<T: RObjectVariant, S: ToR<T>> IntoR<T, ViaToR> for S {
+    fn into_r(self, pc: &Pc) -> &mut T {
+        ToR::to_r(self, pc)
+    }
+}
+
+impl<T: RObjectVariant, S: ToR1<T>> IntoR<T, ViaToR1> for S {
+    fn into_r(self, pc: &Pc) -> &mut T {
+        ToR1::to_r(self, pc)
+    }
+}
+
+impl<T: RObjectVariant, S: ToR2<T>> IntoR<T, ViaToR2> for S {
+    fn into_r(self, pc: &Pc) -> &mut T {
+        ToR2::to_r(self, pc)
+    }
 }
 
 /// Create a reference to an R object from a reference to Rust object.
@@ -2962,54 +3169,42 @@ macro_rules! roxido_registration {
     };
 }
 
-/// Print like Rust's usual [`print!`] macro, except output goes to R's output steam.
+/// Print like Rust's usual [`print!`] macro, except output goes to R's output stream.
 #[macro_export]
 macro_rules! rprint {
-    ($fmt_string:expr) => {
-        $crate::__private_print(format!($fmt_string).as_str(), false, true)
+    ($($arg:tt)*) => {
+        $crate::__private_print(&format!($($arg)*), false, true)
     };
-    ($fmt_string:expr, $( $arg:expr ),* ) => {
-        $crate::__private_print(format!($fmt_string, $($arg),*).as_str(), false, true)
-    }
 }
 
-/// Print like Rust's usual [`println!`] macro, except output goes to R's output steam.
+/// Print like Rust's usual [`println!`] macro, except output goes to R's output stream.
 #[macro_export]
 macro_rules! rprintln {
     () => {
         $crate::__private_print("", true, true)
     };
-    ($fmt_string:expr) => {
-        $crate::__private_print(format!($fmt_string).as_str(), true, true)
+    ($($arg:tt)*) => {
+        $crate::__private_print(&format!($($arg)*), true, true)
     };
-    ($fmt_string:expr, $( $arg:expr ),* ) => {
-        $crate::__private_print(format!($fmt_string, $($arg),*).as_str(), true, true)
-    }
 }
 
-/// Print like Rust's usual [`eprint!`] macro, except output goes to R's error steam.
+/// Print like Rust's usual [`eprint!`] macro, except output goes to R's error stream.
 #[macro_export]
 macro_rules! reprint {
-    ($fmt_string:expr) => {
-        $crate::__private_print(format!($fmt_string).as_str(), false, false)
+    ($($arg:tt)*) => {
+        $crate::__private_print(&format!($($arg)*), false, false)
     };
-    ($fmt_string:expr, $( $arg:expr ),* ) => {
-        $crate::__private_print(format!($fmt_string, $($arg),*).as_str(), false, false)
-    }
 }
 
-/// Print like Rust's usual [`eprintln!`] macro, except output goes to R's error steam.
+/// Print like Rust's usual [`eprintln!`] macro, except output goes to R's error stream.
 #[macro_export]
 macro_rules! reprintln {
     () => {
         $crate::__private_print("", true, false)
     };
-    ($fmt_string:expr) => {
-        $crate::__private_print(format!($fmt_string).as_str(), true, false)
+    ($($arg:tt)*) => {
+        $crate::__private_print(&format!($($arg)*), true, false)
     };
-    ($fmt_string:expr, $( $arg:expr ),* ) => {
-        $crate::__private_print(format!($fmt_string, $($arg),*).as_str(), true, false)
-    }
 }
 
 use std::fmt::Display;
@@ -3017,7 +3212,7 @@ use std::fmt::Display;
 #[doc(hidden)]
 pub struct RStopHelper(pub String);
 
-/// Throw an R error using symmatrics like Rust's [`panic`] macro.
+/// Throw an R error using semantics like Rust's [`panic`] macro.
 ///
 /// Set the `RUST_BACKTRACE` environment variable to see a stack trace.
 #[macro_export]
@@ -3064,7 +3259,7 @@ macro_rules! stop {
 ///
 /// This trait provides the `stop` family of methods, which have similar
 /// functionality to the `unwrap` methods on [`Result`] and [`Option`],
-//  but throw an R error on failure.
+/// but throw an R error on failure.
 pub trait UnwrapOrStop<T> {
     /// Throw an R error.
     ///
@@ -3103,7 +3298,7 @@ impl<T> UnwrapOrStop<T> for Option<T> {
     fn stop(self) -> T {
         match self {
             Some(t) => t,
-            None => stop!(),
+            None => stop!("A required value is missing."),
         }
     }
     fn stop_str(self, msg: &str) -> T {

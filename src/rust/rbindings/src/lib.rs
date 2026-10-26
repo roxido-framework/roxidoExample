@@ -1,4 +1,5 @@
 //! Automatically generated bindings for R's C API. Do not edit.
+#![allow(unknown_lints)]
 #![allow(improper_ctypes)]
 #![allow(non_camel_case_types)]
 #![allow(non_snake_case)]

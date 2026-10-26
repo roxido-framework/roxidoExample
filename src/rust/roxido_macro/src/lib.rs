@@ -21,7 +21,6 @@
 use proc_macro::TokenStream;
 use quote::quote;
 use std::fs::File;
-use std::fs::OpenOptions;
 use std::io::Write;
 use std::path::Path;
 use syn::ext::IdentExt;
@@ -55,7 +54,7 @@ impl syn::parse::Parse for NestedMeta {
 }
 
 macro_rules! TYPE_MESSAGE {
-    () => { "ach argument to a 'roxido' function must have one of the following types: &RArray, &RDataFrame, &RExternalPtr, &RFunction, &RList, &RMatrix, &RObject, &RScalar, &RSymbol, &RVector, SEXP, f64, i32, usize, u8, bool, &str, &[f64], &[i32], &[u8]." };
+    () => { "ach argument to a 'roxido' function must have one of the following types: &RArray, &RDataFrame, &RExternalPtr, &RFunction, &RList, &RMatrix, &RObject, &RScalar, &RSymbol, &RVector, SEXP, f64, i32, usize, u8, bool, &str, &[f64], &[i32], &[u8], or Option<T> for one of these types T." };
 }
 
 fn roxido_fn(options: Vec<NestedMeta>, item_fn: syn::ItemFn) -> TokenStream {
@@ -71,7 +70,6 @@ fn roxido_fn(options: Vec<NestedMeta>, item_fn: syn::ItemFn) -> TokenStream {
         _ => None,
     };
     let mut invisible = false;
-    let mut module = String::new();
     for meta in options {
         let meta = meta.0;
         let meta_string = quote!(#meta).to_string();
@@ -89,9 +87,8 @@ fn roxido_fn(options: Vec<NestedMeta>, item_fn: syn::ItemFn) -> TokenStream {
                             panic!("Unsupported value '{value_string}' for {name_string}.")
                         }
                     },
-                    "module" => {
-                        module = value_string;
-                    }
+                    // Read by build.rs, which names and registers the function.
+                    "module" => {}
                     _ => panic!("Unsupported token '{name_string}'."),
                 }
             }
@@ -110,14 +107,17 @@ fn roxido_fn(options: Vec<NestedMeta>, item_fn: syn::ItemFn) -> TokenStream {
             "A function with the 'roxido' attribute may not have a visibility modifier, but found '{vis_as_string}'."
         );
     }
-    // Check that all arguments are of type '&RObject'.
+    // Generate code to convert each argument from its SEXP.
     let mut arg_names = Vec::with_capacity(args.len());
     let mut generated_statements: Vec<syn::Stmt> = Vec::new();
+    // Arguments that become references, and whether each is modified in place.
+    let mut borrowed_args: Vec<(Box<syn::Pat>, bool, bool)> = Vec::new();
     let mut new_args = args.clone();
     new_args.clear();
     for arg in &args {
         match arg {
             syn::FnArg::Typed(pat_type) => {
+                let mut statements: Vec<syn::Stmt> = Vec::new();
                 let name = &pat_type.pat;
                 let name_as_string = quote!(#name).to_string();
                 if let Some(name_as_string) = name_as_string.strip_prefix("mut ") {
@@ -144,7 +144,13 @@ fn roxido_fn(options: Vec<NestedMeta>, item_fn: syn::ItemFn) -> TokenStream {
                     });
                     new_args.push(syn::FnArg::Typed(y));
                 }
-                let ty = &pat_type.ty;
+                // An argument declared as 'Option<T>' is 'None' for NULL and is otherwise converted as 'T'.
+                let option_inner = option_inner_type(&pat_type.ty);
+                let optional = option_inner.is_some();
+                let ty = option_inner.as_ref().unwrap_or(&pat_type.ty);
+                if matches!(ty.as_ref(), syn::Type::Reference(_)) {
+                    borrowed_args.push((name.clone(), in_place, optional));
+                }
                 if in_place
                     && !matches!(ty.as_ref(), syn::Type::Reference(r) if r.mutability.is_some())
                 {
@@ -163,7 +169,7 @@ fn roxido_fn(options: Vec<NestedMeta>, item_fn: syn::ItemFn) -> TokenStream {
                     if in_place {
                         vec.push(parse_quote! { let #name = unsafe { RObject::from_sexp_mut(#name, pc) }; });
                     } else if mutable {
-                        vec.push(parse_quote! { let #name = unsafe { RObject::__private_from_arg_mut(#name, pc) }; });
+                        vec.push(parse_quote! { let #name = unsafe { RObject::__private_from_arg_mut(#name, stringify!(#name), pc) }; });
                     } else {
                         vec.push(
                             parse_quote! { let #name = unsafe { RObject::from_sexp(#name, pc) }; },
@@ -243,11 +249,7 @@ fn roxido_fn(options: Vec<NestedMeta>, item_fn: syn::ItemFn) -> TokenStream {
                                         }
                                     }
                                     "()" => {
-                                        if mutable {
-                                            vec.push(parse_quote! { let #name = #name.as_char_mut().stop_str(concat!("'", stringify!(#name),"' is expected to have storage mode character.")); });
-                                        } else {
-                                            vec.push(parse_quote! { let #name = #name.as_char().stop_str(concat!("'", stringify!(#name),"' is expected to have storage mode character.")); });
-                                        }
+                                        // Any storage mode is accepted.
                                     }
                                     _ => {
                                         panic!(
@@ -268,25 +270,24 @@ fn roxido_fn(options: Vec<NestedMeta>, item_fn: syn::ItemFn) -> TokenStream {
                         match path.as_ref() {
                             "SEXP" => {}
                             "f64" => {
-                                as_rscalar(&mut generated_statements, false);
-                                generated_statements
-                                    .push(parse_quote! { let #name = #name.f64(); });
+                                as_rscalar(&mut statements, false);
+                                statements.push(parse_quote! { let #name = #name.f64(); });
                             }
                             "i32" => {
-                                as_rscalar(&mut generated_statements, false);
-                                generated_statements.push(parse_quote! { let #name = #name.i32().map_err(|x| format!(concat!("'", stringify!(#name), "' cannot be an integer: {}"), x)).stop(); });
+                                as_rscalar(&mut statements, false);
+                                statements.push(parse_quote! { let #name = #name.i32().map_err(|x| format!(concat!("'", stringify!(#name), "' cannot be an integer: {}"), x)).stop(); });
                             }
                             "usize" => {
-                                as_rscalar(&mut generated_statements, false);
-                                generated_statements.push(parse_quote! { let #name = #name.usize().map_err(|x| format!(concat!("'", stringify!(#name), "' cannot be a usize: {}"), x)).stop(); });
+                                as_rscalar(&mut statements, false);
+                                statements.push(parse_quote! { let #name = #name.usize().map_err(|x| format!(concat!("'", stringify!(#name), "' cannot be a usize: {}"), x)).stop(); });
                             }
                             "u8" => {
-                                as_rscalar(&mut generated_statements, false);
-                                generated_statements.push(parse_quote! { let #name = #name.u8().map_err(|x| format!(concat!("'", stringify!(#name), "' cannot be a raw: {}"), x)).stop(); });
+                                as_rscalar(&mut statements, false);
+                                statements.push(parse_quote! { let #name = #name.u8().map_err(|x| format!(concat!("'", stringify!(#name), "' cannot be a raw: {}"), x)).stop(); });
                             }
                             "bool" => {
-                                as_rscalar(&mut generated_statements, false);
-                                generated_statements.push(parse_quote! { let #name = #name.bool().map_err(|x| format!(concat!("'", stringify!(#name), "' cannot be a logical: {}"), x)).stop(); });
+                                as_rscalar(&mut statements, false);
+                                statements.push(parse_quote! { let #name = #name.bool().map_err(|x| format!(concat!("'", stringify!(#name), "' cannot be a logical: {}"), x)).stop(); });
                             }
                             _ => {
                                 error_msg();
@@ -298,13 +299,13 @@ fn roxido_fn(options: Vec<NestedMeta>, item_fn: syn::ItemFn) -> TokenStream {
                         let mutable = reference.mutability.is_some();
                         match ty.as_ref() {
                             syn::Type::Slice(slice) => {
-                                as_rvector(&mut generated_statements, mutable);
+                                as_rvector(&mut statements, mutable);
                                 let ty = &slice.elem;
                                 let path = quote!(#ty).to_string();
                                 match path.as_ref() {
                                     "f64" => {
                                         as_type(
-                                            &mut generated_statements,
+                                            &mut statements,
                                             "RVector",
                                             "RVector < f64 >",
                                             mutable,
@@ -312,7 +313,7 @@ fn roxido_fn(options: Vec<NestedMeta>, item_fn: syn::ItemFn) -> TokenStream {
                                     }
                                     "i32" => {
                                         as_type(
-                                            &mut generated_statements,
+                                            &mut statements,
                                             "RVector",
                                             "RVector < i32 >",
                                             mutable,
@@ -320,7 +321,7 @@ fn roxido_fn(options: Vec<NestedMeta>, item_fn: syn::ItemFn) -> TokenStream {
                                     }
                                     "u8" => {
                                         as_type(
-                                            &mut generated_statements,
+                                            &mut statements,
                                             "RVector",
                                             "RVector < u8 >",
                                             mutable,
@@ -333,11 +334,10 @@ fn roxido_fn(options: Vec<NestedMeta>, item_fn: syn::ItemFn) -> TokenStream {
                                     }
                                 }
                                 if mutable {
-                                    generated_statements
+                                    statements
                                         .push(parse_quote! { let #name = #name.slice_mut(); });
                                 } else {
-                                    generated_statements
-                                        .push(parse_quote! { let #name = #name.slice(); });
+                                    statements.push(parse_quote! { let #name = #name.slice(); });
                                 }
                             }
                             syn::Type::Path(ty) => {
@@ -362,68 +362,68 @@ fn roxido_fn(options: Vec<NestedMeta>, item_fn: syn::ItemFn) -> TokenStream {
                                                 "'{name_as_string}' is a &mut str, but only &str is supported for a 'roxido' function."
                                             );
                                         }
-                                        as_rscalar(&mut generated_statements, false);
-                                        generated_statements
-                                            .push(parse_quote! { let #name = #name.str(pc); });
+                                        as_rscalar(&mut statements, false);
+                                        statements
+                                            .push(parse_quote! { let #name = #name.str(pc).map_err(|x| format!(concat!("'", stringify!(#name), "' cannot be a string: {}"), x)).stop(); });
                                     }
                                     "RObject" => {
-                                        as_robject(&mut generated_statements, mutable);
+                                        as_robject(&mut statements, mutable);
                                     }
                                     "RList" => {
-                                        as_robject(&mut generated_statements, mutable);
+                                        as_robject(&mut statements, mutable);
                                         if mutable {
-                                            generated_statements.push(parse_quote! { let #name = #name.as_list_mut().stop_str(concat!("'", stringify!(#name),"' is expected to be a list.")); });
+                                            statements.push(parse_quote! { let #name = #name.as_list_mut().stop_str(concat!("'", stringify!(#name),"' is expected to be a list.")); });
                                         } else {
-                                            generated_statements.push(parse_quote! { let #name = #name.as_list().stop_str(concat!("'", stringify!(#name),"' is expected to be a list.")); });
+                                            statements.push(parse_quote! { let #name = #name.as_list().stop_str(concat!("'", stringify!(#name),"' is expected to be a list.")); });
                                         }
                                     }
                                     "RDataFrame" => {
-                                        as_robject(&mut generated_statements, mutable);
+                                        as_robject(&mut statements, mutable);
                                         if mutable {
-                                            generated_statements.push(parse_quote! { let #name = #name.as_data_frame_mut().stop_str(concat!("'", stringify!(#name),"' is expected to be a data frame.")); });
+                                            statements.push(parse_quote! { let #name = #name.as_data_frame_mut().stop_str(concat!("'", stringify!(#name),"' is expected to be a data frame.")); });
                                         } else {
-                                            generated_statements.push(parse_quote! { let #name = #name.as_data_frame().stop_str(concat!("'", stringify!(#name),"' is expected to be a data frame.")); });
+                                            statements.push(parse_quote! { let #name = #name.as_data_frame().stop_str(concat!("'", stringify!(#name),"' is expected to be a data frame.")); });
                                         }
                                     }
                                     "RFunction" => {
-                                        as_robject(&mut generated_statements, mutable);
+                                        as_robject(&mut statements, mutable);
                                         if mutable {
-                                            generated_statements.push(parse_quote! { let #name = #name.as_function_mut().stop_str(concat!("'", stringify!(#name),"' is expected to be a function.")); });
+                                            statements.push(parse_quote! { let #name = #name.as_function_mut().stop_str(concat!("'", stringify!(#name),"' is expected to be a function.")); });
                                         } else {
-                                            generated_statements.push(parse_quote! { let #name = #name.as_function().stop_str(concat!("'", stringify!(#name),"' is expected to be a function.")); });
+                                            statements.push(parse_quote! { let #name = #name.as_function().stop_str(concat!("'", stringify!(#name),"' is expected to be a function.")); });
                                         }
                                     }
                                     "RExternalPtr" => {
-                                        as_robject(&mut generated_statements, mutable);
+                                        as_robject(&mut statements, mutable);
                                         if mutable {
-                                            generated_statements.push(parse_quote! { let #name = #name.as_external_ptr_mut().stop_str(concat!("'", stringify!(#name),"' is expected to be an external pointer.")); });
+                                            statements.push(parse_quote! { let #name = #name.as_external_ptr_mut().stop_str(concat!("'", stringify!(#name),"' is expected to be an external pointer.")); });
                                         } else {
-                                            generated_statements.push(parse_quote! { let #name = #name.as_external_ptr().stop_str(concat!("'", stringify!(#name),"' is expected to be an external pointer.")); });
+                                            statements.push(parse_quote! { let #name = #name.as_external_ptr().stop_str(concat!("'", stringify!(#name),"' is expected to be an external pointer.")); });
                                         }
                                     }
                                     "RSymbol" => {
-                                        as_robject(&mut generated_statements, mutable);
+                                        as_robject(&mut statements, mutable);
                                         if mutable {
-                                            generated_statements.push(parse_quote! { let #name = #name.as_symbol_mut().stop_str(concat!("'", stringify!(#name),"' is expected to be a symbol.")); });
+                                            statements.push(parse_quote! { let #name = #name.as_symbol_mut().stop_str(concat!("'", stringify!(#name),"' is expected to be a symbol.")); });
                                         } else {
-                                            generated_statements.push(parse_quote! { let #name = #name.as_symbol().stop_str(concat!("'", stringify!(#name),"' is expected to be a symbol.")); });
+                                            statements.push(parse_quote! { let #name = #name.as_symbol().stop_str(concat!("'", stringify!(#name),"' is expected to be a symbol.")); });
                                         }
                                     }
                                     x if x.starts_with("RScalar") => {
-                                        as_rscalar(&mut generated_statements, mutable);
-                                        as_type(&mut generated_statements, "RScalar", x, mutable);
+                                        as_rscalar(&mut statements, mutable);
+                                        as_type(&mut statements, "RScalar", x, mutable);
                                     }
                                     x if x.starts_with("RVector") => {
-                                        as_rvector(&mut generated_statements, mutable);
-                                        as_type(&mut generated_statements, "RVector", x, mutable);
+                                        as_rvector(&mut statements, mutable);
+                                        as_type(&mut statements, "RVector", x, mutable);
                                     }
                                     x if x.starts_with("RMatrix") => {
-                                        as_rmatrix(&mut generated_statements, mutable);
-                                        as_type(&mut generated_statements, "RMatrix", x, mutable);
+                                        as_rmatrix(&mut statements, mutable);
+                                        as_type(&mut statements, "RMatrix", x, mutable);
                                     }
                                     x if x.starts_with("RArray") => {
-                                        as_rarray(&mut generated_statements, mutable);
-                                        as_type(&mut generated_statements, "RArray", x, mutable);
+                                        as_rarray(&mut statements, mutable);
+                                        as_type(&mut statements, "RArray", x, mutable);
                                     }
                                     _ => error_msg(),
                                 }
@@ -433,12 +433,39 @@ fn roxido_fn(options: Vec<NestedMeta>, item_fn: syn::ItemFn) -> TokenStream {
                     }
                     _ => error_msg(),
                 }
+                if optional {
+                    generated_statements.push(parse_quote! {
+                        let #name = if unsafe { RObject::from_sexp(#name, pc) }.is_null() {
+                            None
+                        } else {
+                            #( #statements )*
+                            Some(#name)
+                        };
+                    });
+                } else {
+                    generated_statements.extend(statements);
+                }
                 arg_names.push(name_as_string);
             }
             _ => panic!(concat!("E", TYPE_MESSAGE!())),
         }
     }
-    // Check that return is of type '&RObject'.
+    // Check in-place arguments before any argument is converted from its SEXP.
+    let mut in_place_checks: Vec<syn::Stmt> = Vec::new();
+    for (i, (name, in_place, optional)) in borrowed_args.iter().enumerate() {
+        if *in_place {
+            let others: Vec<_> = borrowed_args
+                .iter()
+                .enumerate()
+                .filter(|(j, _)| *j != i)
+                .map(|(_, (other, _, _))| other)
+                .collect();
+            in_place_checks.push(parse_quote! {
+                unsafe { RObject::__private_check_in_place(#name, stringify!(#name), #optional, &[#( (#others, stringify!(#others)) ),*]) };
+            });
+        }
+    }
+    // Check that there is no explicit return type.
     match &output {
         syn::ReturnType::Default => {}
         _ => {
@@ -469,31 +496,6 @@ fn roxido_fn(options: Vec<NestedMeta>, item_fn: syn::ItemFn) -> TokenStream {
         if let Err(err) = write_result {
             panic!("Could not write to the file '{}': {err}", path.display());
         }
-    } else {
-        match std::env::var("R_CARGO_RUN_COUNTER") {
-            Ok(x) if x == "1" => {
-                let filename = "roxido.txt";
-                if let Ok(mut file) = OpenOptions::new().append(true).create(true).open(filename) {
-                    let mut line = String::new();
-                    if !module.is_empty() {
-                        line.push_str(module.as_str());
-                        line.push_str("::");
-                    }
-                    line.push_str(&func_name);
-                    for arg in arg_names.iter() {
-                        line.push_str(", ");
-                        line.push_str(arg)
-                    }
-                    line.push('\n');
-                    if file.write_all(line.as_bytes()).is_err() {
-                        eprintln!("Couldn't append to file: {filename}.");
-                    }
-                } else {
-                    eprintln!("Couldn't open the file: {filename}.");
-                }
-            }
-            _ => {}
-        }
     }
     // Write the function itself, wrapping the body in 'catch_unwind' so that a panic runs Rust
     // destructors before Rf_error long-jumps into R.
@@ -508,6 +510,7 @@ fn roxido_fn(options: Vec<NestedMeta>, item_fn: syn::ItemFn) -> TokenStream {
             let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                 let __roxido_pc = unsafe { Pc::__private_new() };
                 let pc = &__roxido_pc;
+                #( #in_place_checks )*
                 #( #generated_statements )*
                 let mut f = || { #body };
                 f().to_r(pc).sexp()
@@ -542,4 +545,25 @@ fn roxido_fn(options: Vec<NestedMeta>, item_fn: syn::ItemFn) -> TokenStream {
             }
         }
     })
+}
+
+// The type 'T' of an argument declared as 'Option<T>'.
+fn option_inner_type(ty: &syn::Type) -> Option<Box<syn::Type>> {
+    let syn::Type::Path(path) = ty else {
+        return None;
+    };
+    if path.qself.is_some() {
+        return None;
+    }
+    let segment = path.path.segments.last()?;
+    if segment.ident != "Option" {
+        return None;
+    }
+    let syn::PathArguments::AngleBracketed(arguments) = &segment.arguments else {
+        return None;
+    };
+    match arguments.args.iter().collect::<Vec<_>>().as_slice() {
+        [syn::GenericArgument::Type(inner)] => Some(Box::new(inner.clone())),
+        _ => None,
+    }
 }
