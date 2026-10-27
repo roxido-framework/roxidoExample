@@ -1,4 +1,5 @@
 # Run from the repository root: Rscript dev/test-thread-safety.R
+# Set ROXIDO_TEST_RELEASE=true to test an optimized build.
 root <- normalizePath(".", winslash = "/")
 stopifnot(file.exists(file.path(root, "src/rust/roxido/Cargo.toml")))
 work <- tempfile("roxido-thread-safety-")
@@ -47,10 +48,11 @@ local({
 })
 link <- c(link, "-C", paste0("link-arg=", file.path(work, "shims.o")))
 dir <- new_crate("thread-safety", "cdylib")
-cargo(dir, c("rustc", "--lib"), c("--", link))
+profile <- if (identical(Sys.getenv("ROXIDO_TEST_RELEASE"), "true")) "release" else "debug"
+cargo(dir, c("rustc", "--lib", if (profile == "release") "--release"), c("--", link))
 prefix <- if (.Platform$OS.type == "windows") "" else "lib"
 suffix <- if (Sys.info()[["sysname"]] == "Darwin") ".dylib" else .Platform$dynlib.ext
-library <- dyn.load(file.path(dir, "target/debug", paste0(prefix, "thread_safety", suffix)))
+library <- dyn.load(file.path(dir, "target", profile, paste0(prefix, "thread_safety", suffix)))
 call <- function(name, ...) .Call(getNativeSymbolInfo(name, library), ...)
 
 # Build the ALTREP fixture with R's compiler and headers.
@@ -227,4 +229,67 @@ tryCatch({
   f <- function() tryCatch(call("raw_r_error"), error = function(e) NULL)
   stopifnot(isTRUE(call("recover_after_callback", f, FALSE)))
 }, finally = gctorture(FALSE))
+# Regressions for the RCow audit. Keep these under GC torture, including token pool growth.
+gctorture(TRUE)
+tryCatch({
+  x <- c(1, 2)
+  stopifnot(identical(call("custom_read", x), 3),
+    identical(call("custom_write", x), c(9, 2)), identical(x, c(1, 2)))
+  custom_write <- getNativeSymbolInfo("custom_write", library)
+  stopifnot(identical(.Call(custom_write, x * 1), c(9, 2)))
+  stopifnot(isTRUE(call("uninitialized_outputs")))
+  stopifnot(identical(call("list_copy_policy", list(x)), list(c(9, 2))), identical(x, c(1, 2)))
+
+  invisible(call("guard_drops"))
+  for (depth in c(1L, 8L, 32L)) {
+    for (i in 1:2) {
+      result <- tryCatch(call("nested_warning", "bad", depth), warning = function(w) "caught")
+      stopifnot(identical(result, "caught"))
+    }
+    stopifnot(identical(call("guard_drops"), 2L))
+  }
+  old <- options(warn = 2)
+  tryCatch({
+    error <- tryCatch(call("nested_warning", "bad", 8L), error = conditionMessage)
+    stopifnot(grepl("converted from warning", error, fixed = TRUE))
+    invisible(capture.output(stopifnot(identical(call("nested_recovery", "bad"), 42L)),
+      type = "message"))
+  }, finally = options(old))
+  stopifnot(identical(call("guard_drops"), 2L))
+  error <- tryCatch(call("raw_boundary_cleanup"), error = conditionMessage)
+  stopifnot(identical(error, "raw boundary error"), identical(call("guard_drops"), 1L))
+  stopifnot(identical(call("rust_panic_in_boundary"), 42L), identical(call("guard_drops"), 1L))
+
+  make_bad <- getNativeSymbolInfo("make_bad_metadata", altrep)
+  cases <- list(c("len", "empty", "scalar", "slice", "get"),
+    c("matrix", "array", "names"), c("nrow", "ncol"), "data_frame")
+  for (code in 0:3) for (case in cases[[code + 1L]]) {
+    x <- .Call(make_bad, code)
+    error <- tryCatch(call("metadata_error", case, x), error = conditionMessage)
+    stopifnot(grepl("ALTREP", error, fixed = TRUE),
+      identical(call("guard_drops"), 1L), isTRUE(call("worker_joined")))
+  }
+  x <- .Call(getNativeSymbolInfo("make_read_only", altrep))
+  stopifnot(identical(call("read_only_slice", x), 3))
+
+  make_string <- getNativeSymbolInfo("make_ephemeral_string", altrep)
+  x <- .Call(make_string)
+  error <- tryCatch(call("borrowed_altrep_string", x), error = conditionMessage)
+  stopifnot(grepl("get_with_pc", error, fixed = TRUE))
+  stopifnot(identical(call("protected_altrep_string", x), "temporary-string-1"))
+  x <- .Call(make_string)
+  stopifnot(identical(call("echo_str", x), "temporary-string-1"))
+}, finally = gctorture(FALSE))
+# Coercion must allocate the double result without first copying the shared integer input.
+if (isTRUE(capabilities("profmem"))) {
+  x <- rep(1L, 1000000L)
+  log <- file.path(work, "coercion-allocations.log")
+  coerce <- getNativeSymbolInfo("cow_coerce", library)
+  Rprofmem(log, threshold = 1000000L)
+  y <- tryCatch(.Call(coerce, x), finally = Rprofmem(NULL))
+  allocations <- suppressWarnings(as.numeric(sub(" .*", "", readLines(log))))
+  allocations <- allocations[!is.na(allocations)]
+  stopifnot(length(allocations) == 1L, allocations[[1]] >= 8000000,
+    identical(x, rep(1L, 1000000L)), identical(y[[1]], 2), isTRUE(attr(y, "fresh")))
+}
 cat("Compile-fail, thread, and protection checks passed.\n")

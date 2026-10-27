@@ -57,7 +57,7 @@
 //! `abort` and `exit` into R errors; this skips Rust cleanup and is not safe on worker threads.
 //! Avoid them and panicking destructors; use [stop!].
 //!
-//! Intercepting a jump costs about 25 ns per call that can make one, such as an allocation.
+//! Intercepting a jump added about 30 ns per R API call in a release-build microbenchmark.
 //! Raw R API calls through [rbindings] are not intercepted; wrap them with [r_try] or
 //! [Pc::protect_new].
 //!
@@ -92,7 +92,7 @@
 //! or `&[f64]`. To modify an argument, declare it as [RCow], which is copied first only if
 //! anything else in R may reference it, as R does; for a variable, or an argument of an R function,
 //! this is the usual case, but not for a temporary passed directly to `.Call`. An element from
-//! [RList::get_mut] is likewise copied only if it is shared. Return the object to make changes
+//! [RList::get_mut_or_copy] is likewise copied only if it is shared. Return the object to make changes
 //! visible in R.
 //!
 //! ```
@@ -113,7 +113,7 @@
 //! [RCow::try_into_mut] refuses to copy, and the unsafe [RCow::into_mut_in_place] skips the copy,
 //! so every R reference to the object sees the change, including literals in compiled R code. R
 //! cannot copy external pointers or symbols, so an [RCow] of one offers only the latter;
-//! [RList::get_mut] and [RObjectVariant::clone] reject them. `into_mut_in_place` raises an R
+//! [RList::get_mut_or_copy] and [RObjectVariant::clone] reject them. `into_mut_in_place` raises an R
 //! error if the object is `NULL` or the same object as another argument. This does not detect an
 //! object that is reachable from another argument, such as a list element or an attribute, so the
 //! aliasing rule below still applies.
@@ -144,10 +144,11 @@ pub use rbindings;
 pub use rbindings::SEXP;
 
 use rbindings::*;
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::ffi::{CStr, CString, NulError, c_char, c_void};
 use std::marker::PhantomData;
+use std::mem::MaybeUninit;
 
 // C shims compiled by the package from 'src/shims.c'.
 unsafe extern "C" {
@@ -164,47 +165,50 @@ unsafe extern "C" {
 }
 
 thread_local! {
-    // The continuation token that `r_try` gives R, and a preserved one made in advance to replace
-    // it once it holds a jump, since R may then be out of memory or protection.
-    static UNWIND_TOKEN: Cell<SEXP> = const { Cell::new(std::ptr::null_mut()) };
-    static SPARE_UNWIND_TOKEN: Cell<SEXP> = const { Cell::new(std::ptr::null_mut()) };
+    // Only idle tokens are in the pool. Every active boundary and pending R jump owns one.
+    static UNWIND_TOKENS: RefCell<Vec<SEXP>> = const { RefCell::new(Vec::new()) };
+}
+
+struct UnwindToken(SEXP);
+
+impl Drop for UnwindToken {
+    fn drop(&mut self) {
+        // A caught panic may be sent to a worker. Leaking its preserved token there is safer
+        // than using R's API off the main thread.
+        if R::is_main_thread() {
+            UNWIND_TOKENS.with(|pool| pool.borrow_mut().push(self.0));
+        }
+    }
 }
 
 /// Panic payload carrying a long jump by R, such as for an error, that [r_try] intercepted.
 /// The `#[roxido]` boundary resumes the jump once Rust frames have unwound.
 #[doc(hidden)]
 pub struct RUnwind {
-    token: SEXP,
-    // Whether this payload holds the only reference to its token.
-    owned: bool,
+    token: Option<UnwindToken>,
 }
 
-// R's API is used only on R's main thread; see `Drop`.
+// R's API is used only on R's main thread; see `UnwindToken::drop`.
 unsafe impl Send for RUnwind {}
-
-impl RUnwind {
-    /// The continuation token to pass to `R_ContinueUnwind`, which must be called before any R
-    /// allocation once this payload is dropped.
-    #[doc(hidden)]
-    pub fn __private_token(&self) -> SEXP {
-        self.token
-    }
-}
 
 impl Drop for RUnwind {
     fn drop(&mut self) {
-        if self.owned && R::is_main_thread() {
-            unsafe { R_ReleaseObject(self.token) };
+        // Abandoning a caught jump must also release its R return value. The entry-point
+        // handler takes the token first when it intends to resume the jump instead.
+        if let Some(token) = &self.token {
+            if R::is_main_thread() {
+                unsafe { SETCAR(token.0, R_NilValue) };
+            }
         }
     }
 }
 
-// Make a preserved continuation token.
+// Make a preserved continuation token. Call inside an unwind boundary, except at initialization.
 unsafe fn make_unwind_token() -> SEXP {
     unsafe {
-        // R_PreserveObject protects its argument if it allocates.
-        let token = R_MakeUnwindCont();
+        let token = Rf_protect(R_MakeUnwindCont());
         R_PreserveObject(token);
+        Rf_unprotect(1);
         token
     }
 }
@@ -214,7 +218,13 @@ unsafe fn make_unwind_token() -> SEXP {
 /// The `#[roxido]` boundary then lets R's jump continue. See [R errors](crate#r-errors).
 ///
 /// Roxido's own methods already do this, so it is needed only for raw calls through [rbindings].
-/// To make and protect an R object, use [Pc::protect_new].
+/// To make and protect an R object, use [Pc::protect_new]. The first call at a new nesting depth
+/// can allocate continuation tokens, so captured R objects must already be rooted.
+///
+/// Keep this closure limited to raw R calls. R's jump skips the closure's own Rust frames,
+/// including destructors for locals and owned captures; only frames outside this boundary unwind.
+/// Keep guards, owned resources, and scoped threads outside the closure, and capture by reference.
+/// A Rust panic (including one from a nested Roxido call) does unwind the closure normally.
 ///
 /// ```
 /// use roxido::*;
@@ -229,16 +239,23 @@ unsafe fn make_unwind_token() -> SEXP {
 #[inline]
 pub fn r_try<T, F: FnOnce() -> T>(f: F) -> T {
     check_main_thread();
-    // Replace a spare token that a jump used, unless Rust is still unwinding from that jump.
-    if SPARE_UNWIND_TOKEN.with(Cell::get).is_null() && !std::thread::panicking() {
-        let spare = unwind_protect(|| unsafe { make_unwind_token() });
-        SPARE_UNWIND_TOKEN.with(|t| t.set(spare));
+    let token = UNWIND_TOKENS
+        .with(|pool| pool.borrow_mut().pop())
+        .unwrap_or_else(|| crate::stop!("No R unwind token available during token allocation."));
+    let token = UnwindToken(token);
+    // Reserve a token for nested calls and destructors before entering user code. Pool growth
+    // uses our own boundary, so an R allocation failure still unwinds Rust. No RefCell borrow
+    // is held while R runs. Once a nesting depth is warmed up, this does not allocate.
+    if !std::thread::panicking() && UNWIND_TOKENS.with(|pool| pool.borrow().is_empty()) {
+        let (token, spare) = unwind_protect(token, || unsafe { make_unwind_token() });
+        UNWIND_TOKENS.with(|pool| pool.borrow_mut().push(spare));
+        return unwind_protect(token, f).1;
     }
-    unwind_protect(f)
+    unwind_protect(token, f).1
 }
 
 #[inline]
-fn unwind_protect<T, F: FnOnce() -> T>(f: F) -> T {
+fn unwind_protect<T, F: FnOnce() -> T>(token: UnwindToken, f: F) -> (UnwindToken, T) {
     struct Data<F, T> {
         f: Option<F>,
         result: Option<std::thread::Result<T>>,
@@ -257,26 +274,20 @@ fn unwind_protect<T, F: FnOnce() -> T>(f: F) -> T {
         result: None,
     };
     let mut jumped = 0;
-    let token = UNWIND_TOKEN.with(Cell::get);
     unsafe {
         roxido_unwind_protect(
             trampoline::<F, T>,
             (&raw mut data).cast(),
-            token,
+            token.0,
             &mut jumped,
         )
     };
     if jumped != 0 {
-        // The token now holds the jump, so later calls, such as from destructors, need another.
-        let spare = SPARE_UNWIND_TOKEN.with(|t| t.replace(std::ptr::null_mut()));
-        let owned = !spare.is_null();
-        if owned {
-            UNWIND_TOKEN.with(|t| t.set(spare));
-        }
-        std::panic::panic_any(RUnwind { token, owned });
+        // Keep the token out of the pool until this panic is caught or its jump is resumed.
+        std::panic::panic_any(RUnwind { token: Some(token) });
     }
     match data.result {
-        Some(Ok(value)) => value,
+        Some(Ok(value)) => (token, value),
         Some(Err(payload)) => std::panic::resume_unwind(payload),
         None => unreachable!(),
     }
@@ -383,7 +394,7 @@ pub trait RObjectVariant: private::Sealed + Sized {
 
     /// Get the class of an R object.
     fn get_class(&self) -> &RVector<char> {
-        unsafe { Rf_getAttrib(self.sexp(), R_ClassSymbol).transmute(self) }
+        unsafe { r_try(|| Rf_getAttrib(self.sexp(), R_ClassSymbol)).transmute(self) }
     }
 
     /// Set the class of an R object.
@@ -441,10 +452,12 @@ pub trait RObjectVariant: private::Sealed + Sized {
 
 /// Methods for R objects that can be sliced.
 pub trait RSliceable<T> {
-    /// Return a slice of the R object's data.
+    /// Return a slice of the R object's data. ALTREP storage may be materialized, which can
+    /// allocate and take time proportional to the length. Obtain a slice once before a hot loop.
     fn slice(&self) -> &[T];
 
-    /// Return a mutable slice of the R object's data.
+    /// Return a mutable slice of the R object's initialized data. ALTREP storage may be
+    /// materialized. For uninitialized output, use [RUninit::slice_mut] instead.
     fn slice_mut(&mut self) -> &mut [T];
 }
 
@@ -452,18 +465,18 @@ pub trait RSliceable<T> {
 pub trait RHasLength: RObjectVariant {
     /// Returns the length of the R object.
     fn len(&self) -> usize {
-        let len = unsafe { Rf_xlength(self.sexp()) };
+        let len = altrep_try(self.sexp(), || unsafe { Rf_xlength(self.sexp()) });
         len.try_into().unwrap() // Won't ever fail if R is sane.
     }
 
     /// Checks to see if the R object is empty.
     fn is_empty(&self) -> bool {
-        unsafe { Rf_xlength(self.sexp()) == 0 }
+        self.len() == 0
     }
 
     /// Checks to see if the R object is a scalar (i.e., has length equal to one).
     fn is_scalar(&self) -> bool {
-        unsafe { Rf_xlength(self.sexp()) == 1 }
+        self.len() == 1
     }
 }
 
@@ -471,7 +484,16 @@ pub trait RHasLength: RObjectVariant {
 pub trait RHasNames: RHasLength {
     /// Get names of the R object.
     fn get_names(&self) -> &RVector<char> {
-        unsafe { Rf_getAttrib(self.sexp(), R_NamesSymbol).transmute(self) }
+        let names = r_try(|| unsafe {
+            // R computes names of a one-dimensional array from dimnames[[1]]. An ALTREP
+            // dimnames list need not retain that element, so it needs explicit protection.
+            let dim = Rf_getAttrib(self.sexp(), R_DimSymbol);
+            if Rf_xlength(dim) == 1 && ALTREP(Rf_getAttrib(self.sexp(), R_DimNamesSymbol)) != 0 {
+                crate::stop!("ALTREP dimnames require get_attribute(RSymbol::names(), pc).");
+            }
+            Rf_getAttrib(self.sexp(), R_NamesSymbol)
+        });
+        unsafe { names.transmute(self) }
     }
 
     /// Set names of the R object.
@@ -487,7 +509,7 @@ pub trait RHasNames: RHasLength {
     /// # Safety
     /// `names` is stored without copying; see the [aliasing rule](crate#aliasing).
     unsafe fn set_names_object(&mut self, names: &RVector<char>) -> Result<(), &'static str> {
-        if unsafe { Rf_length(names.sexp()) != Rf_length(self.sexp()) } {
+        if names.len() != self.len() {
             return Err("Length of names is not correct.");
         }
         r_try(|| unsafe { Rf_namesgets(self.sexp(), names.sexp()) });
@@ -557,15 +579,6 @@ pub trait RVectorConstructors<T> {
     #[expect(clippy::mut_from_ref)]
     fn new(length: usize, pc: &Pc) -> &mut Self;
 
-    /// Allocate a vector without initializing its data, which saves time when every element is
-    /// about to be written, for example by worker threads. Strings are still initialized to empty.
-    ///
-    /// # Safety
-    /// Write every element, for example through `slice_mut`, before reading any of them and before
-    /// R can see the vector, such as by returning it.
-    #[expect(clippy::mut_from_ref)]
-    unsafe fn new_uninit(length: usize, pc: &Pc) -> &mut Self;
-
     #[expect(clippy::mut_from_ref)]
     fn from_value(value: T, length: usize, pc: &Pc) -> &mut Self;
 
@@ -582,15 +595,6 @@ pub trait RMatrixConstructors<T> {
     #[expect(clippy::mut_from_ref)]
     fn new(nrow: usize, ncol: usize, pc: &Pc) -> &mut Self;
 
-    /// Allocate a matrix without initializing its data, which saves time when every element is
-    /// about to be written, for example by worker threads.
-    ///
-    /// # Safety
-    /// Write every element, for example through `slice_mut`, before reading any of them and before
-    /// R can see the matrix, such as by returning it.
-    #[expect(clippy::mut_from_ref)]
-    unsafe fn new_uninit(nrow: usize, ncol: usize, pc: &Pc) -> &mut Self;
-
     #[expect(clippy::mut_from_ref)]
     fn from_value(value: T, nrow: usize, ncol: usize, pc: &Pc) -> &mut Self;
 }
@@ -601,18 +605,132 @@ pub trait RArrayConstructors<T> {
     #[expect(clippy::mut_from_ref)]
     fn new<'a>(dim: &[usize], pc: &'a Pc) -> &'a mut Self;
 
-    /// Allocate an array without initializing its data, which saves time when every element is
-    /// about to be written, for example by worker threads.
-    ///
-    /// # Safety
-    /// Write every element, for example through `slice_mut`, before reading any of them and before
-    /// R can see the array, such as by returning it.
-    #[expect(clippy::mut_from_ref)]
-    unsafe fn new_uninit<'a>(dim: &[usize], pc: &'a Pc) -> &'a mut Self;
-
     #[expect(clippy::mut_from_ref)]
     fn from_value<'a>(value: T, dim: &[usize], pc: &'a Pc) -> &'a mut Self;
 }
+
+/// An R output buffer whose elements have not yet been initialized.
+///
+/// Numeric vectors, matrices, and arrays create this handle with `new_uninit`. It exposes only
+/// `MaybeUninit` slots; call [Self::assume_init] after writing every slot to obtain the R object.
+/// Dropping an unfinished buffer is safe: its protection counter eventually releases it.
+///
+/// ```
+/// use roxido::*;
+///
+/// #[roxido]
+/// fn parallel_output() {
+///     let mut output = RVector::<f64>::new_uninit(1000, pc);
+///     std::thread::scope(|scope| {
+///         for chunk in output.slice_mut().chunks_mut(250) {
+///             scope.spawn(move || {
+///                 for slot in chunk { slot.write(2.0); }
+///             });
+///         }
+///     });
+///     // Every worker has joined and every slot was written.
+///     unsafe { output.assume_init() }
+/// }
+/// ```
+#[must_use]
+pub struct RUninit<'a, V, T> {
+    sexp: SEXP,
+    data: *mut MaybeUninit<T>,
+    len: usize,
+    lifetime: PhantomData<&'a mut V>,
+}
+
+impl<'a, V, T> RUninit<'a, V, T> {
+    /// Borrow the uninitialized slots. These may be split among scoped worker threads.
+    pub fn slice_mut(&mut self) -> &mut [MaybeUninit<T>] {
+        if self.len == 0 {
+            &mut []
+        } else {
+            unsafe { std::slice::from_raw_parts_mut(self.data, self.len) }
+        }
+    }
+
+    /// Finish initialization and obtain the ordinary R object, without copying its storage.
+    ///
+    /// # Safety
+    /// Every slot must contain an initialized value of `T`.
+    pub unsafe fn assume_init(self) -> &'a mut V {
+        // Expose the typed object only after all initialization writes have finished.
+        unsafe { &mut *self.sexp.cast::<V>() }
+    }
+}
+
+// These constructors only allocate ordinary atomic R vectors, so their data and length accessors
+// cannot dispatch to ALTREP. The object stays inaccessible until `assume_init` consumes the handle.
+macro_rules! runinit_vector {
+    ($mode:ty, $element:ty, $code:expr, $ptr:expr) => {
+        impl RVector<$mode> {
+            /// Allocate output without zeroing its data. Write every [RUninit] slot before
+            /// converting the handle to an ordinary vector with `assume_init`.
+            pub fn new_uninit(length: usize, pc: &Pc) -> RUninit<'_, Self, $element> {
+                let length_r = length.try_into().stop_str(TOO_LONG);
+                unsafe {
+                    let sexp = pc.protect_new(|| Rf_allocVector($code, length_r));
+                    RUninit {
+                        sexp,
+                        lifetime: PhantomData,
+                        data: $ptr(sexp).cast(),
+                        len: length,
+                    }
+                }
+            }
+        }
+    };
+}
+
+macro_rules! runinit_matrix_array {
+    ($mode:ty, $code:expr, $ptr:expr) => {
+        impl RMatrix<$mode> {
+            /// Allocate an uninitialized output matrix; see [RUninit].
+            pub fn new_uninit(nrow: usize, ncol: usize, pc: &Pc) -> RUninit<'_, Self, $mode> {
+                let nrow = nrow.try_into().stop_str(TOO_LONG);
+                let ncol = ncol.try_into().stop_str(TOO_LONG);
+                unsafe {
+                    let sexp = pc.protect_new(|| Rf_allocMatrix($code, nrow, ncol));
+                    RUninit {
+                        sexp,
+                        lifetime: PhantomData,
+                        data: $ptr(sexp).cast(),
+                        len: Rf_xlength(sexp).try_into().unwrap(),
+                    }
+                }
+            }
+        }
+
+        impl RArray<$mode> {
+            /// Allocate an uninitialized output array; see [RUninit].
+            pub fn new_uninit<'a>(dim: &[usize], pc: &'a Pc) -> RUninit<'a, Self, $mode> {
+                let dim = dim
+                    .iter()
+                    .map(|x| i32::try_from(*x).stop_str(TOO_LONG))
+                    .to_r(pc)
+                    .sexp();
+                unsafe {
+                    let sexp = pc.protect_new(|| Rf_allocArray($code, dim));
+                    RUninit {
+                        sexp,
+                        lifetime: PhantomData,
+                        data: $ptr(sexp).cast(),
+                        len: Rf_xlength(sexp).try_into().unwrap(),
+                    }
+                }
+            }
+        }
+    };
+}
+
+runinit_vector!(f64, f64, REALSXP, REAL);
+runinit_vector!(i32, i32, INTSXP, INTEGER);
+runinit_vector!(u8, u8, RAWSXP, RAW);
+runinit_vector!(bool, i32, LGLSXP, LOGICAL);
+runinit_matrix_array!(f64, REALSXP, REAL);
+runinit_matrix_array!(i32, INTSXP, INTEGER);
+runinit_matrix_array!(u8, RAWSXP, RAW);
 
 static TOO_LONG: &str = "Could not fit usize into i32.";
 
@@ -749,6 +867,24 @@ fn altrep_try<T>(sexp: SEXP, f: impl FnOnce() -> T) -> T {
     } else {
         f()
     }
+}
+
+// Both length and element access may invoke ALTREP methods. Test ALTREP once, outside the
+// bounds check, so ordinary indexed access does not pay for two dispatch checks.
+#[inline]
+fn vector_index<T>(
+    sexp: SEXP,
+    index: usize,
+    f: impl FnOnce(R_xlen_t) -> T,
+) -> Result<T, &'static str> {
+    altrep_try(sexp, || {
+        let len: usize = unsafe { Rf_xlength(sexp) }.try_into().unwrap();
+        if index < len {
+            Ok(f(index.try_into().unwrap()))
+        } else {
+            Err("Index out of bounds.")
+        }
+    })
 }
 
 fn dimnames_to_r<'a>(dimnames: &[Option<&[&str]>], pc: &'a Pc) -> &'a RList {
@@ -899,7 +1035,8 @@ impl Pc {
     /// Protect a raw R object until this counter is dropped.
     ///
     /// # Safety
-    /// `sexp` must point to a live R object.
+    /// `sexp` must stay rooted while [r_try] acquires its continuation token. To protect a freshly
+    /// allocated object without a gap, use [Self::protect_new].
     pub unsafe fn protect(&self, sexp: SEXP) -> SEXP {
         self.check_active();
         r_try(|| unsafe { Rf_protect(sexp) });
@@ -908,7 +1045,8 @@ impl Pc {
     }
 
     /// Call `f`, which uses R's API to make an R object, and protect the object until this
-    /// counter is dropped. An R error in `f` unwinds Rust frames as a panic does.
+    /// counter is dropped, without allocating between its creation and protection. As with
+    /// [r_try], R errors unwind frames outside `f`; keep owned resources outside the closure.
     ///
     /// # Safety
     /// `f` must return a live R object.
@@ -926,8 +1064,8 @@ impl Pc {
     }
 
     /// # Safety
-    /// `sexp` must point to a live R object of type `T`, and the returned reference must follow the
-    /// [aliasing rule](crate#aliasing).
+    /// `sexp` must point to a rooted R object of type `T` (see [Self::protect]), and the returned
+    /// reference must follow the [aliasing rule](crate#aliasing).
     #[expect(clippy::mut_from_ref)]
     pub unsafe fn protect_and_transmute<T: RObjectVariant>(&self, sexp: SEXP) -> &mut T {
         unsafe { self.protect(sexp).transmute_mut(self) }
@@ -1323,12 +1461,12 @@ impl RObject {
 
     /// Check if it can be interpreted as a matrix in R.
     pub fn is_matrix(&self) -> bool {
-        unsafe { Rf_isMatrix(self.sexp()) != 0 }
+        r_try(|| unsafe { Rf_isMatrix(self.sexp()) != 0 })
     }
 
     /// Check if it can be interpreted as an array in R.
     pub fn is_array(&self) -> bool {
-        unsafe { Rf_isArray(self.sexp()) != 0 }
+        r_try(|| unsafe { Rf_isArray(self.sexp()) != 0 })
     }
 
     /// Check if it can be interpreted as a symbol in R.
@@ -1348,12 +1486,8 @@ impl RObject {
             return false;
         }
         let inherits = || unsafe { Rf_inherits(sexp, c"data.frame".as_ptr()) != 0 };
-        // R computes the class of an S4 object, which allocates.
-        if unsafe { Rf_isS4(sexp) } != 0 {
-            r_try(inherits)
-        } else {
-            inherits()
-        }
+        // Class vectors may be ALTREP even when the object itself is ordinary.
+        r_try(inherits)
     }
 
     /// Check if it can be interpreted as a function in R.
@@ -1451,17 +1585,20 @@ impl RFunction {
         // R_GetCurrentEnv is experimental API, but R_GlobalEnv would hide the calling R function
         // from parent.frame(), unlike base R's callbacks.
         // R_tryEval protects objects before it catches errors, so it can overflow R's stack.
-        let sexp = r_try(|| unsafe {
-            R_tryEval(
-                expression,
-                R_GetCurrentEnv(),
-                std::ptr::from_mut(&mut p_out_error),
-            )
-        });
+        let sexp = unsafe {
+            pc.protect_new(|| {
+                let value = R_tryEval(
+                    expression,
+                    R_GetCurrentEnv(),
+                    std::ptr::from_mut(&mut p_out_error),
+                );
+                if p_out_error == 0 { value } else { R_NilValue }
+            })
+        };
         // An R error inside the call may have jumped over nested counters.
         PC_DEPTH.with(|depth| depth.set(pc.depth));
         match p_out_error {
-            0 => Ok(unsafe { pc.protect(sexp).transmute(pc) }),
+            0 => Ok(unsafe { sexp.transmute(pc) }),
             e => Err(e),
         }
     }
@@ -1737,7 +1874,7 @@ impl<T> RScalar<T> {
     ///
     /// An error is returned for `NA` and for strings that cannot be represented in UTF-8.
     pub fn str<'a>(&'a self, pc: &'a Pc) -> Result<&'a str, &'static str> {
-        self.to_char(pc).get()
+        self.to_char(pc).get_with_pc(pc)
     }
 
     /// Check if RObject can be interpreted as an NA value in R.
@@ -1997,7 +2134,7 @@ rconvertable!(RMatrix);
 rconvertable!(RArray);
 
 macro_rules! rsliceable {
-    ($name:ident, $tipe:ty, $tipe2:ty, $ptr:expr) => {
+    ($name:ident, $tipe:ty, $tipe2:ty, $ptr:expr, $ptr_ro:expr) => {
         impl RSliceable<$tipe2> for $name<$tipe> {
             fn slice(&self) -> &[$tipe2] {
                 let len = self.len();
@@ -2005,7 +2142,7 @@ macro_rules! rsliceable {
                 if len == 0 {
                     &[]
                 } else {
-                    let ptr = altrep_try(self.sexp(), || unsafe { $ptr(self.sexp()) });
+                    let ptr = altrep_try(self.sexp(), || unsafe { $ptr_ro(self.sexp()) });
                     unsafe { std::slice::from_raw_parts(ptr, len) }
                 }
             }
@@ -2023,22 +2160,22 @@ macro_rules! rsliceable {
     };
 }
 
-rsliceable!(RScalar, f64, f64, REAL);
-rsliceable!(RScalar, i32, i32, INTEGER);
-rsliceable!(RScalar, u8, u8, RAW);
-rsliceable!(RScalar, bool, i32, LOGICAL);
-rsliceable!(RVector, f64, f64, REAL);
-rsliceable!(RVector, i32, i32, INTEGER);
-rsliceable!(RVector, u8, u8, RAW);
-rsliceable!(RVector, bool, i32, LOGICAL);
-rsliceable!(RMatrix, f64, f64, REAL);
-rsliceable!(RMatrix, i32, i32, INTEGER);
-rsliceable!(RMatrix, u8, u8, RAW);
-rsliceable!(RMatrix, bool, i32, LOGICAL);
-rsliceable!(RArray, f64, f64, REAL);
-rsliceable!(RArray, i32, i32, INTEGER);
-rsliceable!(RArray, u8, u8, RAW);
-rsliceable!(RArray, bool, i32, LOGICAL);
+rsliceable!(RScalar, f64, f64, REAL, REAL_RO);
+rsliceable!(RScalar, i32, i32, INTEGER, INTEGER_RO);
+rsliceable!(RScalar, u8, u8, RAW, RAW_RO);
+rsliceable!(RScalar, bool, i32, LOGICAL, LOGICAL_RO);
+rsliceable!(RVector, f64, f64, REAL, REAL_RO);
+rsliceable!(RVector, i32, i32, INTEGER, INTEGER_RO);
+rsliceable!(RVector, u8, u8, RAW, RAW_RO);
+rsliceable!(RVector, bool, i32, LOGICAL, LOGICAL_RO);
+rsliceable!(RMatrix, f64, f64, REAL, REAL_RO);
+rsliceable!(RMatrix, i32, i32, INTEGER, INTEGER_RO);
+rsliceable!(RMatrix, u8, u8, RAW, RAW_RO);
+rsliceable!(RMatrix, bool, i32, LOGICAL, LOGICAL_RO);
+rsliceable!(RArray, f64, f64, REAL, REAL_RO);
+rsliceable!(RArray, i32, i32, INTEGER, INTEGER_RO);
+rsliceable!(RArray, u8, u8, RAW, RAW_RO);
+rsliceable!(RArray, bool, i32, LOGICAL, LOGICAL_RO);
 
 macro_rules! rscalar_getset {
     ($tipe:ty, $tipe2:ty, $get:expr, $set:expr) => {
@@ -2075,10 +2212,15 @@ impl RGetSet0<bool> for RScalar<bool> {
 impl RScalar<char> {
     /// Get the value of a scalar.
     ///
-    /// An error is returned for `NA` and for strings that cannot be represented in UTF-8.
+    /// An error is returned for `NA`, invalid UTF-8, or ALTREP; use `get_with_pc` for ALTREP.
     pub fn get(&self) -> Result<&str, &'static str> {
-        let sexp = altrep_try(self.sexp(), || unsafe { STRING_ELT(self.sexp(), 0) });
-        charsxp_as_str(sexp, self)
+        self.as_vector().get(0)
+    }
+
+    /// Read a scalar, protecting a string that ALTREP may create on demand. Ordinary strings
+    /// are borrowed directly. `pc.nested` can bound protection when reading many ALTREP strings.
+    pub fn get_with_pc<'a>(&'a self, pc: &'a Pc) -> Result<&'a str, &'static str> {
+        self.as_vector().get_with_pc(0, pc)
     }
 
     /// Set the value of a scalar.
@@ -2120,35 +2262,21 @@ macro_rules! rvector {
 
         impl RGetSet1<$tipe> for RVector<$tipe> {
             fn get(&self, index: usize) -> Result<$tipe, &'static str> {
-                if index < self.len() {
-                    let index = index.try_into().unwrap();
-                    Ok(altrep_try(self.sexp(), || unsafe {
-                        $get(self.sexp(), index)
-                    }))
-                } else {
-                    Err("Index out of bounds.")
-                }
+                vector_index(self.sexp(), index, |index| unsafe {
+                    $get(self.sexp(), index)
+                })
             }
 
             fn set(&mut self, index: usize, value: $tipe) -> Result<(), &'static str> {
-                if index < self.len() {
-                    let index = index.try_into().unwrap();
-                    altrep_try(self.sexp(), || unsafe { $set(self.sexp(), index, value) });
-                    Ok(())
-                } else {
-                    Err("Index out of bounds.")
-                }
+                vector_index(self.sexp(), index, |index| unsafe {
+                    $set(self.sexp(), index, value)
+                })
             }
         }
 
         impl RVectorConstructors<$tipe> for RVector<$tipe> {
             fn new(length: usize, pc: &Pc) -> &mut Self {
                 Self::from_value(0 as $tipe, length, pc)
-            }
-
-            unsafe fn new_uninit(length: usize, pc: &Pc) -> &mut Self {
-                let length = length.try_into().stop_str(TOO_LONG);
-                unsafe { pc.protect_new_as(|| Rf_allocVector($code, length)) }
             }
 
             fn from_value(value: $tipe, length: usize, pc: &Pc) -> &mut Self {
@@ -2229,38 +2357,22 @@ impl RGetSet1<bool> for RVector<bool> {
 impl RVector<bool> {
     /// Get the value at a certain index as R stores it in an `i32`.
     pub fn get_i32(&self, index: usize) -> Result<i32, &'static str> {
-        if index < self.len() {
-            let index = index.try_into().unwrap();
-            Ok(altrep_try(self.sexp(), || unsafe {
-                LOGICAL_ELT(self.sexp(), index)
-            }))
-        } else {
-            Err("Index out of bounds.")
-        }
+        vector_index(self.sexp(), index, |index| unsafe {
+            LOGICAL_ELT(self.sexp(), index)
+        })
     }
 
     /// Set the value at a certain index as R stores it in an `i32`.
     pub fn set_i32(&mut self, index: usize, value: i32) -> Result<(), &'static str> {
-        if index < self.len() {
-            let index = index.try_into().unwrap();
-            altrep_try(self.sexp(), || unsafe {
-                SET_LOGICAL_ELT(self.sexp(), index, value)
-            });
-            Ok(())
-        } else {
-            Err("Index out of bounds.")
-        }
+        vector_index(self.sexp(), index, |index| unsafe {
+            SET_LOGICAL_ELT(self.sexp(), index, value)
+        })
     }
 }
 
 impl RVectorConstructors<bool> for RVector<bool> {
     fn new(length: usize, pc: &Pc) -> &mut Self {
         Self::from_value(false, length, pc)
-    }
-
-    unsafe fn new_uninit(length: usize, pc: &Pc) -> &mut Self {
-        let length = length.try_into().stop_str(TOO_LONG);
-        unsafe { pc.protect_new_as(|| Rf_allocVector(LGLSXP, length)) }
     }
 
     fn from_value(value: bool, length: usize, pc: &Pc) -> &mut Self {
@@ -2284,13 +2396,27 @@ impl RVectorConstructors<bool> for RVector<bool> {
 impl RVector<char> {
     /// Get the value at a certain index in the R object.
     ///
-    /// An error is returned for `NA` and for strings that cannot be represented in UTF-8.
+    /// An error is returned for `NA`, invalid UTF-8, or ALTREP; use `get_with_pc` for ALTREP.
     pub fn get(&self, index: usize) -> Result<&str, &'static str> {
         if index < self.len() {
             self.get_unchecked(index)
         } else {
             Err("Index out of bounds.")
         }
+    }
+
+    /// Read a string, protecting an ALTREP element until `pc` is released. Ordinary vectors
+    /// need no additional protection. Use `pc.nested` when iterating over many ALTREP strings.
+    pub fn get_with_pc<'a>(&'a self, index: usize, pc: &'a Pc) -> Result<&'a str, &'static str> {
+        if unsafe { ALTREP(self.sexp()) } == 0 {
+            return self.get(index);
+        }
+        if index >= self.len() {
+            return Err("Index out of bounds.");
+        }
+        let index = index.try_into().unwrap();
+        let sexp = unsafe { pc.protect_new(|| STRING_ELT(self.sexp(), index)) };
+        charsxp_as_str(sexp, pc)
     }
 
     /// Check whether the value at a certain index is `NA`.
@@ -2315,8 +2441,11 @@ impl RVector<char> {
     }
 
     fn get_unchecked(&self, index: usize) -> Result<&str, &'static str> {
+        if unsafe { ALTREP(self.sexp()) } != 0 {
+            return Err("Cannot borrow ALTREP strings without protection; use get_with_pc.");
+        }
         let index = index.try_into().unwrap();
-        let sexp = altrep_try(self.sexp(), || unsafe { STRING_ELT(self.sexp(), index) });
+        let sexp = unsafe { STRING_ELT(self.sexp(), index) };
         charsxp_as_str(sexp, self)
     }
 
@@ -2345,11 +2474,6 @@ impl RVectorConstructors<&str> for RVector<char> {
     fn new(length: usize, pc: &Pc) -> &mut Self {
         let length = length.try_into().stop_str(TOO_LONG);
         unsafe { pc.protect_new_as(|| Rf_allocVector(STRSXP, length)) }
-    }
-
-    // R always initializes the elements of a character vector.
-    unsafe fn new_uninit(length: usize, pc: &Pc) -> &mut Self {
-        Self::new(length, pc)
     }
 
     fn from_value<'a>(value: &str, length: usize, pc: &'a Pc) -> &'a mut Self {
@@ -2411,12 +2535,6 @@ macro_rules! rmatrix {
                 Self::from_value(0 as $tipe, nrow, ncol, pc)
             }
 
-            unsafe fn new_uninit(nrow: usize, ncol: usize, pc: &Pc) -> &mut Self {
-                let nrow = nrow.try_into().stop_str(TOO_LONG);
-                let ncol = ncol.try_into().stop_str(TOO_LONG);
-                unsafe { pc.protect_new_as(|| Rf_allocMatrix($code, nrow, ncol)) }
-            }
-
             fn from_value(value: $tipe, nrow: usize, ncol: usize, pc: &Pc) -> &mut Self {
                 let nrow = nrow.try_into().stop_str(TOO_LONG);
                 let ncol = ncol.try_into().stop_str(TOO_LONG);
@@ -2437,12 +2555,12 @@ rmatrix!(u8, RAWSXP, RAW, RAW_ELT, SET_RAW_ELT);
 impl<T> RMatrix<T> {
     /// Return the number of rows in the RMatrix.
     pub fn nrow(&self) -> usize {
-        unsafe { Rf_nrows(self.sexp()).try_into().unwrap() }
+        r_try(|| unsafe { Rf_nrows(self.sexp()).try_into().unwrap() })
     }
 
     /// Returns the number of columns in the RMatrix.
     pub fn ncol(&self) -> usize {
-        unsafe { Rf_ncols(self.sexp()).try_into().unwrap() }
+        r_try(|| unsafe { Rf_ncols(self.sexp()).try_into().unwrap() })
     }
 
     /// Return the dimensions of the RMatrix.
@@ -2466,7 +2584,7 @@ impl<T> RMatrix<T> {
     /// Manipulate the matrix in place to be a vector by dropping the `dim` attribute.
     pub fn to_vector_mut(&mut self) -> &mut RVector<T> {
         unsafe {
-            Rf_setAttrib(self.sexp(), R_DimSymbol, R_NilValue);
+            r_try(|| Rf_setAttrib(self.sexp(), R_DimSymbol, R_NilValue));
             self.transmute_mut()
         }
     }
@@ -2564,15 +2682,6 @@ macro_rules! rarray {
                 Self::from_value(0 as $tipe, dim, pc)
             }
 
-            unsafe fn new_uninit<'a>(dim: &[usize], pc: &'a Pc) -> &'a mut Self {
-                let dim = dim
-                    .iter()
-                    .map(|x| i32::try_from(*x).stop_str(TOO_LONG))
-                    .to_r(pc)
-                    .sexp();
-                unsafe { pc.protect_new_as(|| Rf_allocArray($code, dim)) }
-            }
-
             fn from_value<'a>(value: $tipe, dim: &[usize], pc: &'a Pc) -> &'a mut Self {
                 let dim = dim
                     .iter()
@@ -2603,7 +2712,7 @@ impl<T> RArray<T> {
     /// Manipulate the matrix in place to be a vector by dropping the `dim` attribute.
     pub fn to_vector_mut(&mut self) -> &mut RVector<T> {
         unsafe {
-            Rf_setAttrib(self.sexp(), R_DimSymbol, R_NilValue);
+            r_try(|| Rf_setAttrib(self.sexp(), R_DimSymbol, R_NilValue));
             self.transmute_mut()
         }
     }
@@ -2750,7 +2859,7 @@ macro_rules! rlistlike {
             /// Get the value at a certain index in the R list, first copying it if it is shared.
             /// Returns an error for objects R cannot copy, such as external pointers and symbols.
             /// ALTREP lists must be copied to an ordinary list before borrowing elements.
-            pub fn get_mut(&mut self, index: usize) -> Result<&mut RObject, &'static str> {
+            pub fn get_mut_or_copy(&mut self, index: usize) -> Result<&mut RObject, &'static str> {
                 if unsafe { ALTREP(self.sexp()) } != 0 {
                     return Err(
                         "Cannot borrow ALTREP list elements; copy to an ordinary list first.",
@@ -2778,6 +2887,32 @@ macro_rules! rlistlike {
                 } else {
                     Err("Index out of bounds.")
                 }
+            }
+
+            /// Borrow an element for writing without copying. `Ok(None)` means it is shared.
+            /// Out-of-bounds indices, ALTREP lists, and uncopyable objects return an error.
+            pub fn try_get_mut(&mut self, index: usize) -> Result<Option<&mut RObject>, &'static str> {
+                if unsafe { ALTREP(self.sexp()) } != 0 {
+                    return Err("Cannot borrow ALTREP list elements; copy to an ordinary list first.");
+                }
+                if index >= self.len() {
+                    return Err("Index out of bounds.");
+                }
+                unsafe {
+                    let value = VECTOR_ELT(self.sexp(), index.try_into().unwrap());
+                    check_mutable(value)?;
+                    if roxido_maybe_shared(value) != 0 {
+                        Ok(None)
+                    } else {
+                        Ok(Some(value.transmute_mut(self)))
+                    }
+                }
+            }
+
+            /// Get an element, copying it if shared. Prefer the explicitly named replacement.
+            #[deprecated(note = "use get_mut_or_copy, or try_get_mut to prohibit copying")]
+            pub fn get_mut(&mut self, index: usize) -> Result<&mut RObject, &'static str> {
+                self.get_mut_or_copy(index)
             }
 
             /// Convert a Rust value, such as a scalar, slice, or iterator, to a new R object and
@@ -2855,14 +2990,20 @@ macro_rules! rlistlike {
             }
 
             /// Get a value in an R list based on its key.
-            pub fn get_mut_by_key(&mut self, key: impl AsRef<str>) -> Result<&mut RObject, String> {
+            pub fn get_mut_or_copy_by_key(&mut self, key: impl AsRef<str>) -> Result<&mut RObject, String> {
                 let names = self.get_names();
                 for i in 0..names.len() {
                     if names.get(i) == Ok(key.as_ref()) {
-                        return Ok(self.get_mut(i)?);
+                        return Ok(self.get_mut_or_copy(i)?);
                     }
                 }
                 Err(format!("Could not find '{}' in the list.", key.as_ref()))
+            }
+
+            /// Get an element by name, copying it if shared.
+            #[deprecated(note = "use get_mut_or_copy_by_key")]
+            pub fn get_mut_by_key(&mut self, key: impl AsRef<str>) -> Result<&mut RObject, String> {
+                self.get_mut_or_copy_by_key(key)
             }
 
             /// Convert the list into an [`RListMap`]
@@ -3496,36 +3637,39 @@ impl<T> UnwrapOrStop<T> for Option<T> {
 #[cold]
 #[inline(never)]
 pub unsafe fn __private_raise(payload: Box<dyn std::any::Any + Send>, function: &str) -> ! {
-    if let Some(token) = payload
-        .downcast_ref::<RUnwind>()
-        .map(RUnwind::__private_token)
-    {
-        // Dropping the payload releases the token, so resume R's jump before R allocates.
-        drop(payload);
-        unsafe { R_ContinueUnwind(token) };
-    } else {
-        // R uses only the start of a long message, so copy that much out of the payload, which
-        // must be dropped before R's long jump. R would end the message at a NUL.
-        let mut buffer = [0u8; 8192];
-        {
-            let panic_message;
-            let message = match payload.downcast_ref::<RStopHelper>() {
-                Some(x) => x.0.as_str(),
-                None => {
-                    panic_message =
-                        format!("Panic in Rust function '{function}' with 'roxido' attribute.");
-                    panic_message.as_str()
-                }
-            };
-            let message = message.split('\0').next().unwrap_or_default();
-            let mut len = message.len().min(buffer.len() - 1);
-            while !message.is_char_boundary(len) {
-                len -= 1;
-            }
-            buffer[..len].copy_from_slice(&message.as_bytes()[..len]);
+    match payload.downcast::<RUnwind>() {
+        Ok(mut jump) => {
+            let token = jump.token.take().unwrap();
+            let sexp = token.0;
+            drop(jump);
+            // Return the token to the pool, then resume before another r_try can reuse it.
+            drop(token);
+            unsafe { R_ContinueUnwind(sexp) };
         }
-        drop(payload);
-        unsafe { Rf_error(c"%s".as_ptr(), buffer.as_ptr()) };
+        Err(payload) => {
+            // R uses only the start of a long message, so copy that much out of the payload, which
+            // must be dropped before R's long jump. R would end the message at a NUL.
+            let mut buffer = [0u8; 8192];
+            {
+                let panic_message;
+                let message = match payload.downcast_ref::<RStopHelper>() {
+                    Some(x) => x.0.as_str(),
+                    None => {
+                        panic_message =
+                            format!("Panic in Rust function '{function}' with 'roxido' attribute.");
+                        panic_message.as_str()
+                    }
+                };
+                let message = message.split('\0').next().unwrap_or_default();
+                let mut len = message.len().min(buffer.len() - 1);
+                while !message.is_char_boundary(len) {
+                    len -= 1;
+                }
+                buffer[..len].copy_from_slice(&message.as_bytes()[..len]);
+            }
+            drop(payload);
+            unsafe { Rf_error(c"%s".as_ptr(), buffer.as_ptr()) };
+        }
     }
     // Neither R_ContinueUnwind nor Rf_error returns.
     unsafe { std::hint::unreachable_unchecked() }
@@ -3541,8 +3685,8 @@ pub unsafe extern "C" fn __private_init() -> SEXP {
     if IS_MAIN_THREAD.with(|x| x.replace(true)) {
         return unsafe { R_NilValue };
     }
-    UNWIND_TOKEN.with(|t| t.set(unsafe { make_unwind_token() }));
-    SPARE_UNWIND_TOKEN.with(|t| t.set(unsafe { make_unwind_token() }));
+    let tokens = unsafe { vec![make_unwind_token(), make_unwind_token()] };
+    UNWIND_TOKENS.with(|pool| *pool.borrow_mut() = tokens);
     let default_panic = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |panic_info| {
         if panic_info.payload().downcast_ref::<RStopHelper>().is_none()
@@ -3651,7 +3795,7 @@ impl<'a, T: RObjectVariant> RCow<'a, T> {
     }
 
     /// Write access, first copying the object if it is borrowed. The copy is shallow: a list's
-    /// elements are shared until [RList::get_mut] copies one.
+    /// elements are shared until [RList::get_mut_or_copy] copies one.
     ///
     /// For an [RObject], raises an R error if R cannot copy the object, such as an environment.
     #[expect(clippy::mut_from_ref)]
@@ -3802,8 +3946,14 @@ impl<'a> RArg<'a> {
         self.name
     }
 
-    /// The argument's object.
-    pub fn robject(&self) -> &'a RObject {
+    /// Borrow the argument's object while retaining the option to consume this argument.
+    pub fn robject(&self) -> &RObject {
+        unsafe { self.sexp.transmute(self) }
+    }
+
+    /// Consume the argument for read access lasting for the whole call. This gives up the
+    /// exclusive access that [Self::into_cow] might otherwise provide.
+    pub fn into_ref(self) -> &'a RObject {
         unsafe { self.sexp.transmute(self.pc) }
     }
 
@@ -3890,7 +4040,7 @@ fn check_arg<T: private::ArgType>(arg: &RArg) -> Result<(), String> {
 impl<'a, T: private::ArgType> FromRArg<'a> for &'a T {
     fn from_arg(arg: RArg<'a>) -> Result<Self, String> {
         check_arg::<T>(&arg)?;
-        Ok(unsafe { arg.robject().transmute() })
+        Ok(unsafe { arg.into_ref().transmute() })
     }
 }
 

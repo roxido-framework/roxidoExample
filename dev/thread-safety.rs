@@ -140,7 +140,7 @@ fn list_element(x: &RList) {
 fn list_element_mut(x: RCow<RList>) {
     // The test supplies lists that nothing else uses.
     let x = unsafe { x.into_mut_in_place() };
-    x.get_mut(0).stop().as_scalar().stop().i32().stop()
+    x.get_mut_or_copy(0).stop().as_scalar().stop().i32().stop()
 }
 
 #[roxido]
@@ -311,7 +311,7 @@ fn transform(x: RCow<RVector<f64>>) {
 #[roxido]
 fn bump_first(list: RCow<RList>) {
     let list = list.into_mut_or_copy(pc);
-    let first = list.get_mut(0).unwrap().as_vector_mut().unwrap();
+    let first = list.get_mut_or_copy(0).unwrap().as_vector_mut().unwrap();
     first.as_f64_mut().unwrap().slice_mut()[0] += 1.0;
     list
 }
@@ -490,7 +490,7 @@ fn borrow_mutable_object(value: RCow<RObject>) {
 
 #[roxido]
 fn borrow_mutable_element(values: RCow<RList>) {
-    let _ = values.into_mut_or_copy(pc).get_mut(0).stop();
+    let _ = values.into_mut_or_copy(pc).get_mut_or_copy(0).stop();
     true
 }
 
@@ -544,7 +544,7 @@ fn cow_aliased() {
     let mut result = Vec::new();
     // Calling the generated entry point directly is the only way to pass one fresh object twice.
     for (a, b) in [(x.sexp(), x.sexp()), (x.sexp(), y.sexp())] {
-        let pair = unsafe { RObject::from_sexp(pc.protect(cow_pair(a, b)), pc) };
+        let pair = unsafe { RObject::from_sexp(pc.protect_new(|| cow_pair(a, b)), pc) };
         result.extend(
             pair.as_vector()
                 .unwrap()
@@ -615,5 +615,243 @@ fn swallowed_r_error() {
 
 #[roxido]
 fn echo_str(x: &str) {
+    x
+}
+
+// A custom converter may inspect its argument before making one consuming ownership choice.
+struct CustomRead<'a>(&'a [f64]);
+impl<'a> FromRArg<'a> for CustomRead<'a> {
+    fn from_arg(arg: RArg<'a>) -> Result<Self, String> {
+        assert!(arg.robject().is_vector());
+        Ok(Self(arg.into_ref().as_vector()?.as_f64()?.slice()))
+    }
+}
+struct CustomWrite<'a>(RCow<'a, RObject>);
+impl<'a> FromRArg<'a> for CustomWrite<'a> {
+    fn from_arg(arg: RArg<'a>) -> Result<Self, String> {
+        assert!(arg.robject().is_vector());
+        Ok(Self(arg.into_cow()))
+    }
+}
+#[roxido]
+fn custom_read(x: CustomRead) {
+    x.0.iter().sum::<f64>()
+}
+#[roxido]
+fn custom_write(x: CustomWrite) {
+    let x = x.0.into_mut_or_copy(pc);
+    x.as_vector_mut().unwrap().as_f64_mut().unwrap().slice_mut()[0] = 9.0;
+    x
+}
+
+fn nested_r_try<T>(depth: usize, f: impl FnOnce() -> T) -> T {
+    if depth == 0 {
+        f()
+    } else {
+        r_try(|| nested_r_try(depth - 1, f))
+    }
+}
+
+#[roxido]
+fn nested_warning(x: &RVector, depth: usize) {
+    let _guard = Guard;
+    nested_r_try(depth, || x.to_f64(pc))
+}
+
+#[roxido]
+fn nested_recovery(x: &RVector) {
+    let _guard = Guard;
+    nested_r_try(8, || {
+        for _ in 0..3 {
+            let error = catch_unwind(AssertUnwindSafe(|| {
+                let _ = x.to_f64(pc);
+            }));
+            assert!(error.unwrap_err().downcast_ref::<RUnwind>().is_some());
+            pc.nested(|pc| {
+                for _ in 0..5 {
+                    let _ = RVector::from_value(1.0, 32, pc);
+                }
+            });
+        }
+    });
+    42_i32
+}
+
+#[roxido]
+fn raw_boundary_cleanup() {
+    // Owned state belongs outside the raw-call closure, including its captures.
+    let _guard = Guard;
+    let message = std::ffi::CString::new("raw boundary error").unwrap();
+    r_try(|| unsafe { rbindings::Rf_error(c"%s".as_ptr(), message.as_ptr()) });
+}
+
+#[roxido]
+fn rust_panic_in_boundary() {
+    let result = catch_unwind(AssertUnwindSafe(|| {
+        r_try(|| {
+            let _guard = Guard;
+            stop!("ordinary Rust panic");
+        });
+    }));
+    assert!(result.unwrap_err().downcast_ref::<RStopHelper>().is_some());
+    42_i32
+}
+
+static JOINED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+#[roxido]
+fn worker_joined() {
+    JOINED.swap(false, std::sync::atomic::Ordering::SeqCst)
+}
+
+#[roxido]
+fn metadata_error(case: &str, x: &RObject) {
+    let _guard = Guard;
+    let output = RVector::from_value(1.0, 100, pc);
+    std::thread::scope(|scope| {
+        let values = output.slice_mut();
+        scope.spawn(move || {
+            std::thread::sleep(std::time::Duration::from_millis(5));
+            values.iter_mut().for_each(|value| *value = 2.0);
+            JOINED.store(true, std::sync::atomic::Ordering::SeqCst);
+        });
+        match case {
+            "len" => {
+                x.as_vector().unwrap().len();
+            }
+            "empty" => {
+                x.as_vector().unwrap().is_empty();
+            }
+            "scalar" => {
+                x.as_vector().unwrap().is_scalar();
+            }
+            "slice" => {
+                x.as_vector().unwrap().as_f64().unwrap().slice();
+            }
+            "get" => {
+                let _ = x.as_vector().unwrap().as_f64().unwrap().get(0);
+            }
+            "matrix" => {
+                x.is_matrix();
+            }
+            "array" => {
+                x.is_array();
+            }
+            "nrow" => {
+                x.as_matrix().unwrap().nrow();
+            }
+            "ncol" => {
+                x.as_matrix().unwrap().ncol();
+            }
+            "data_frame" => {
+                x.is_data_frame();
+            }
+            "names" => {
+                x.as_vector().unwrap().get_names();
+            }
+            _ => stop!("unknown metadata probe"),
+        }
+    });
+    true
+}
+
+#[roxido]
+fn read_only_slice(x: &RVector<f64>) {
+    x.slice().iter().sum::<f64>()
+}
+
+#[roxido]
+fn borrowed_altrep_string(x: &RVector<char>) {
+    x.get(0).stop()
+}
+#[roxido]
+fn protected_altrep_string(x: &RVector<char>) {
+    let first = x.get_with_pc(0, pc).stop();
+    for _ in 0..20 {
+        pc.nested(|pc| {
+            // The fixture returns a different element each time and never retains it.
+            let _ = x.get_with_pc(0, pc).stop();
+            let _ = RVector::<char>::from_value("overwrite", 30, pc);
+        });
+    }
+    first
+}
+
+#[roxido]
+fn uninitialized_outputs() {
+    macro_rules! check {
+        ($ty:ty) => {
+            for n in [0, 8] {
+                let mut output = RVector::<$ty>::new_uninit(n, pc);
+                std::thread::scope(|scope| {
+                    for slots in output.slice_mut().chunks_mut(2) {
+                        scope.spawn(move || {
+                            for slot in slots {
+                                slot.write(7 as $ty);
+                            }
+                        });
+                    }
+                });
+                assert_eq!(unsafe { output.assume_init() }.slice(), vec![7 as $ty; n]);
+                let mut output = RMatrix::<$ty>::new_uninit(n, 2, pc);
+                for slot in output.slice_mut() {
+                    slot.write(3 as $ty);
+                }
+                let output = unsafe { output.assume_init() };
+                assert_eq!(output.dim(), [n, 2]);
+                assert_eq!(output.slice(), vec![3 as $ty; n * 2]);
+                let mut output = RArray::<$ty>::new_uninit(&[1, n, 2], pc);
+                for slot in output.slice_mut() {
+                    slot.write(4 as $ty);
+                }
+                let output = unsafe { output.assume_init() };
+                assert_eq!(output.dim(), vec![1, n, 2]);
+                assert_eq!(output.slice(), vec![4 as $ty; n * 2]);
+            }
+        };
+    }
+    check!(f64);
+    check!(i32);
+    check!(u8);
+    let mut logical = RVector::<bool>::new_uninit(3, pc);
+    for (slot, value) in logical.slice_mut().iter_mut().zip([0, 1, R::na_bool()]) {
+        slot.write(value);
+    }
+    assert_eq!(
+        unsafe { logical.assume_init() }.slice(),
+        &[0, 1, R::na_bool()]
+    );
+    // Partial initialization and panic abandon the buffer without exposing its data to R.
+    let error = catch_unwind(AssertUnwindSafe(|| {
+        pc.nested(|pc| {
+            let mut output = RVector::<f64>::new_uninit(10, pc);
+            output.slice_mut()[0].write(1.0);
+            stop!("unfinished output");
+        });
+    }));
+    assert!(error.is_err());
+    true
+}
+
+#[roxido]
+fn list_copy_policy(x: RCow<RList>) {
+    let x = x.into_mut_or_copy(pc);
+    let original = x.get(0).unwrap().sexp();
+    assert!(x.try_get_mut(0).unwrap().is_none());
+    assert_eq!(x.get(0).unwrap().sexp(), original);
+    let element = x.get_mut_or_copy(0).unwrap();
+    assert_ne!(element.sexp(), original);
+    element
+        .as_vector_mut()
+        .unwrap()
+        .as_f64_mut()
+        .unwrap()
+        .slice_mut()[0] = 9.0;
+    let copied = element.sexp();
+    assert_eq!(x.try_get_mut(0).unwrap().unwrap().sexp(), copied);
+    assert!(x.try_get_mut(99).is_err());
+    let fresh = RList::new(1, pc);
+    fresh.set(0, &[1.0, 2.0][..]).unwrap();
+    let address = fresh.get(0).unwrap().sexp();
+    assert_eq!(fresh.try_get_mut(0).unwrap().unwrap().sexp(), address);
     x
 }

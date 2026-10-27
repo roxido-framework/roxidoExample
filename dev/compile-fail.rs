@@ -322,3 +322,74 @@
 //! use roxido::*;
 //! fn f(p: &mut RExternalPtr) { p.reencode(|_| 42_i32); }
 //! ```
+
+//! Argument inspection cannot survive consumption for exclusive access.
+//!
+//! ```compile_fail
+//! use roxido::*;
+//! fn aliases<'a>(arg: RArg<'a>) -> (&'a RObject, &'a mut RObject) {
+//!     let read = arg.robject();
+//!     let write = match arg.into_cow().try_into_mut() { Ok(x) => x, Err(_) => panic!() };
+//!     (read, write)
+//! }
+//! ```
+//! ```compile_fail
+//! use roxido::*;
+//! struct Aliases<'a>(&'a [f64], &'a mut RObject);
+//! impl<'a> FromRArg<'a> for Aliases<'a> {
+//!     fn from_arg(arg: RArg<'a>) -> Result<Self, String> {
+//!         let read = arg.robject().as_vector().unwrap().as_f64().unwrap().slice();
+//!         let write = match arg.into_cow().try_into_mut() {
+//!             Ok(x) => x, Err(_) => return Err("shared".into()),
+//!         };
+//!         Ok(Self(read, write))
+//!     }
+//! }
+//! ```
+//! ```compile_fail
+//! use roxido::*;
+//! fn inspect(arg: RArg<'_>) {
+//!     let read = arg.into_ref();
+//!     let _ = arg.into_cow();
+//!     let _ = read.is_null();
+//! }
+//! ```
+//!
+//! Uninitialized buffers cannot be read, returned to R, sent to workers, or exposed while a
+//! worker still borrows their slots. Finishing initialization requires an explicit unsafe step.
+//!
+//! ```compile_fail
+//! use roxido::*;
+//! fn read(pc: &Pc) { let output = RVector::<f64>::new_uninit(3, pc); output.slice(); }
+//! ```
+//! ```compile_fail
+//! use roxido::*;
+//! #[roxido]
+//! fn unfinished() { RVector::<f64>::new_uninit(3, pc) }
+//! ```
+//! ```compile_fail
+//! use roxido::*;
+//! fn finish(pc: &Pc) { RVector::<f64>::new_uninit(3, pc).assume_init(); }
+//! ```
+//! ```compile_fail
+//! use roxido::*;
+//! fn send<T: Send>() {}
+//! send::<RUninit<'static, RVector<f64>, f64>>();
+//! ```
+//! ```compile_fail
+//! use roxido::*;
+//! fn finish_early(pc: &Pc) {
+//!     let mut output = RVector::<f64>::new_uninit(3, pc);
+//!     std::thread::scope(|scope| {
+//!         let slots = output.slice_mut();
+//!         scope.spawn(move || { for slot in slots { slot.write(1.0); } });
+//!         unsafe { output.assume_init() };
+//!     });
+//! }
+//! ```
+//! ```compile_fail
+//! use roxido::*;
+//! fn escape(pc: &Pc) -> RUninit<'_, RVector<f64>, f64> {
+//!     pc.nested(|inner| RVector::<f64>::new_uninit(3, inner))
+//! }
+//! ```

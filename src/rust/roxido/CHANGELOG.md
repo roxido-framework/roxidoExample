@@ -18,16 +18,31 @@ Breaking changes:
 - Arguments are converted by the new `FromRArg` trait instead of matching type names, so an
   unsupported type is a trait error and type aliases work. `Option<SEXP>` is rejected, since a
   `SEXP` can already be `NULL`.
+- Numeric `new_uninit` constructors now return `RUninit`, with `MaybeUninit` slots. Allocate
+  without `unsafe`, write each slot with `slot.write(value)`, then call
+  `unsafe { output.assume_init() }`. The buffer cannot be read or returned to R before that
+  step. Character vectors always initialize their elements; use their ordinary `new`.
+- `RArg::robject()` borrows only while the argument handle is borrowed. Custom converters that
+  return a reference lasting for the whole call must consume the argument with `into_ref()`.
+- Character-vector and character-scalar `get()` reject ALTREP. Use `get_with_pc` to protect
+  elements that an ALTREP implementation may create without retaining. `&str` arguments and
+  `RScalar::str(pc)` use that protected path automatically.
 
 New:
 
 - An R error raised inside R's API, such as a failed allocation, an overflow of R's protection
   stack, an invalid `dim` or `class`, or a coercion warning under `options(warn = 2)`, unwinds
   Rust frames as a panic does. Destructors run and scoped threads are joined before R's jump
-  continues, including for `tryCatch(f(x), warning = ...)` around a coercion that warns. A call
-  that can raise one costs about 25 ns more.
+  continues, including for `tryCatch(f(x), warning = ...)` around a coercion that warns. A wrapped R API
+  call added about 30 ns in a release-build microbenchmark.
 - `r_try` intercepts R errors in raw calls through `rbindings`; `Pc::protect_new` also protects
-  the object that the call makes.
+  the object that the call makes. Keep guards, owned captures, and scoped threads outside the
+  raw-call closure: R's jump skips the closure itself, and Rust unwinds its callers.
+- `RList` and `RDataFrame` offer `get_mut_or_copy` and `try_get_mut`. The latter returns
+  `Ok(None)` for a shared element and never copies. The old `get_mut` and `get_mut_by_key`
+  names are deprecated in favor of names that expose the possible copy.
+- Shared slices request read-only data from R. ALTREP may still materialize storage; acquire
+  a slice once before a computational loop.
 - `RCow<T>` gives write access to an argument, copying it only if something else may reach it.
   A temporary passed directly to `.Call`, such as `x * 2`, is written without a copy. Its
   `to_f64`, `to_i32`, `to_u8`, `to_bool` and `to_char` keep it fresh when they coerce. `RCow` of
@@ -45,10 +60,16 @@ Updating code:
 2. Replace `to_f64_mut(pc)` on an argument with an `RCow` argument and
    `x.to_f64(pc).into_mut_or_copy(pc)`, and likewise for the other storage modes.
 3. Wrap raw R API calls that can raise an R error with `r_try`, or with `pc.protect_new` for
-   one that makes an object.
+   one that makes an object. Use `pc.protect_new(|| allocate())`, rather than protecting an
+   unrooted result afterward: acquiring an unwind token at a new nesting depth can allocate.
 
 Fixes:
 
+- Nested unwind boundaries use distinct preserved continuation tokens, reused after each call.
+  Warning handlers, caught R errors, and nested callbacks no longer overwrite a pending jump.
+- ALTREP length, dimension, and class access is covered by the unwind boundary, including
+  errors before a slice's data pointer is acquired. Rust destructors run and scoped workers join.
+- Fresh callback results are protected in the same boundary that evaluates the callback.
 - `rprintln!`, `R::flush_console` and `R::check_user_interrupt`, which could raise an R error
   when R's protection stack was full, unwind instead.
 
@@ -62,8 +83,7 @@ Remaining limits:
 
 - A destructor that uses R's API while Rust unwinds from an R error can fail, for example
   if R's protection stack is full, and a second panic aborts.
-- Strings borrowed from some third-party ALTREP character vectors can dangle. Copy them to
-  ordinary vectors first, for example with `c(x)` in R.
+- Raw R API calls need the boundary and rooting discipline documented by `r_try`.
 
 ## 0.7.1
 
