@@ -1,5 +1,70 @@
 # Changelog
 
+## Unreleased
+
+An R error inside R's API unwinds Rust. Arguments are modified through `RCow`, not `&mut`.
+
+Breaking changes:
+
+- `#[roxido]` functions cannot take `&mut` arguments or `#[unsafe(in_place)]`; the compiler
+  says what to write instead. Declare `x: RCow<T>` and get write access with
+  `x.into_mut_or_copy(pc)`, which copies only if R may still reference the object, as `&mut`
+  did; `x.try_into_mut()`, which never copies; or `unsafe { x.into_mut_in_place() }`, as
+  `#[unsafe(in_place)]` did. `into_mut_in_place` raises an R error for `NULL`, and for an object
+  passed in any other argument, not only in a borrowed one.
+- `to_f64_mut`, `to_i32_mut`, `to_u8_mut`, `to_bool_mut` and `to_char_mut` are removed. For
+  another storage mode they wrote to a coerced copy, so writes to an integer vector through
+  `to_f64_mut` were silently lost. Use `x.to_f64(pc).into_mut_or_copy(pc)` on an `RCow`.
+- Arguments are converted by the new `FromRArg` trait instead of matching type names, so an
+  unsupported type is a trait error and type aliases work. `Option<SEXP>` is rejected, since a
+  `SEXP` can already be `NULL`.
+
+New:
+
+- An R error raised inside R's API, such as a failed allocation, an overflow of R's protection
+  stack, an invalid `dim` or `class`, or a coercion warning under `options(warn = 2)`, unwinds
+  Rust frames as a panic does. Destructors run and scoped threads are joined before R's jump
+  continues, including for `tryCatch(f(x), warning = ...)` around a coercion that warns. A call
+  that can raise one costs about 25 ns more.
+- `r_try` intercepts R errors in raw calls through `rbindings`; `Pc::protect_new` also protects
+  the object that the call makes.
+- `RCow<T>` gives write access to an argument, copying it only if something else may reach it.
+  A temporary passed directly to `.Call`, such as `x * 2`, is written without a copy. Its
+  `to_f64`, `to_i32`, `to_u8`, `to_bool` and `to_char` keep it fresh when they coerce. `RCow` of
+  an external pointer or a symbol offers only `into_mut_in_place`, and `RCow<RFunction>` is a
+  compile error.
+- `Option<T>` works for every argument type, including `RCow<T>`. It is `None` for `NULL` only;
+  since `c()` is `NULL`, an empty vector made with `c()` is `None`.
+
+Updating code:
+
+1. Replace each `&mut` argument as the compiler suggests: `x: &mut RVector<f64>` becomes
+   `x: RCow<RVector<f64>>` followed by `let x = x.into_mut_or_copy(pc);`, and
+   `#[unsafe(in_place)] x: &mut T` becomes `x: RCow<T>` followed by
+   `let x = unsafe { x.into_mut_in_place() };`.
+2. Replace `to_f64_mut(pc)` on an argument with an `RCow` argument and
+   `x.to_f64(pc).into_mut_or_copy(pc)`, and likewise for the other storage modes.
+3. Wrap raw R API calls that can raise an R error with `r_try`, or with `pc.protect_new` for
+   one that makes an object.
+
+Fixes:
+
+- `rprintln!`, `R::flush_console` and `R::check_user_interrupt`, which could raise an R error
+  when R's protection stack was full, unwind instead.
+
+Build:
+
+- Roxido calls `roxido_unwind_protect`, `roxido_no_references` and `roxido_maybe_shared` from
+  the template's `src/shims.c`, which `roxido update` installs. They also let a package load on
+  R before 4.5, where `NO_REFERENCES` and `MAYBE_SHARED` are not functions.
+
+Remaining limits:
+
+- A destructor that uses R's API while Rust unwinds from an R error can fail, for example
+  if R's protection stack is full, and a second panic aborts.
+- Strings borrowed from some third-party ALTREP character vectors can dangle. Copy them to
+  ordinary vectors first, for example with `c(x)` in R.
+
 ## 0.7.1
 
 Breaking changes:

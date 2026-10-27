@@ -137,7 +137,9 @@ fn list_element(x: &RList) {
 }
 
 #[roxido]
-fn list_element_mut(#[unsafe(in_place)] x: &mut RList) {
+fn list_element_mut(x: RCow<RList>) {
+    // The test supplies lists that nothing else uses.
+    let x = unsafe { x.into_mut_in_place() };
     x.get_mut(0).stop().as_scalar().stop().i32().stop()
 }
 
@@ -293,27 +295,51 @@ fn strings(n: i32) {
 }
 
 #[roxido]
-fn bump(x: &mut RVector<f64>, y: &[f64]) {
+fn bump(x: RCow<RVector<f64>>, y: &[f64]) {
+    let x = x.into_mut_or_copy(pc);
     x.slice_mut()[0] += 1.0;
     [x.slice()[0], y[0]]
 }
 
 #[roxido]
-fn transform(x: &mut RVector<f64>) {
+fn transform(x: RCow<RVector<f64>>) {
+    let x = x.into_mut_or_copy(pc);
     x.slice_mut().iter_mut().for_each(|x| *x *= 2.0);
     x
 }
 
 #[roxido]
-fn bump_first(list: &mut RList) {
+fn bump_first(list: RCow<RList>) {
+    let list = list.into_mut_or_copy(pc);
     let first = list.get_mut(0).unwrap().as_vector_mut().unwrap();
     first.as_f64_mut().unwrap().slice_mut()[0] += 1.0;
     list
 }
 
 #[roxido]
-fn bump_in_place(#[unsafe(in_place)] x: &mut [f64]) {
-    x[0] += 1.0;
+fn bump_in_place(x: RCow<RVector<f64>>, other: &RObject) {
+    // The test supplies a vector that nothing else uses while this runs.
+    let x = unsafe { x.into_mut_in_place() };
+    x.slice_mut()[0] += 1.0;
+    let _ = other;
+}
+
+#[roxido]
+fn object_in_place(x: RCow<RObject>) {
+    // The test supplies only objects that this does not modify.
+    let _ = unsafe { x.into_mut_in_place() };
+}
+
+#[roxido]
+fn optional_cow(x: Option<RCow<RVector<f64>>>) {
+    match x {
+        Some(x) => {
+            let x = x.into_mut_or_copy(pc);
+            x.slice_mut()[0] += 1.0;
+            x.slice()[0]
+        }
+        None => -1.0,
+    }
 }
 
 #[roxido]
@@ -458,27 +484,136 @@ fn clone_object(value: &RObject) {
 }
 
 #[roxido]
-fn borrow_mutable_object(value: &mut RObject) {
-    value
+fn borrow_mutable_object(value: RCow<RObject>) {
+    value.into_mut_or_copy(pc)
 }
 
 #[roxido]
-fn borrow_mutable_element(values: &mut RList) {
-    let _ = values.get_mut(0).stop();
+fn borrow_mutable_element(values: RCow<RList>) {
+    let _ = values.into_mut_or_copy(pc).get_mut(0).stop();
     true
 }
 
 #[roxido]
-fn pointer_in_place(#[unsafe(in_place)] value: &mut RExternalPtr) {
+fn pointer_in_place(value: RCow<RExternalPtr>) {
     // The test supplies an exclusively accessed pointer from make_pointer.
     unsafe {
+        let value = value.into_mut_in_place();
         *value.decode_mut::<i32>() += 1;
+        value
     }
-    value
 }
 
 #[roxido]
 fn pointer_value(value: &RExternalPtr) {
     // The test supplies an i32 pointer from make_pointer.
     unsafe { *value.decode_ref::<i32>() }
+}
+
+#[roxido]
+fn cow_fresh(x: RCow<RVector<f64>>) {
+    x.is_fresh()
+}
+
+#[roxido]
+fn cow_scale(x: RCow<RVector<f64>>) {
+    let y = x.into_mut_or_copy(pc);
+    y.slice_mut().iter_mut().for_each(|v| *v *= 2.0);
+    y
+}
+
+#[roxido]
+fn cow_coerce(x: RCow<RVector>) {
+    let x = x.to_f64(pc);
+    let fresh = x.is_fresh();
+    let y = x.into_mut_or_copy(pc);
+    y.slice_mut()[0] += 1.0;
+    y.set_attribute(RSymbol::from("fresh").unwrap(), fresh);
+    y
+}
+
+#[roxido]
+fn cow_pair(x: RCow<RVector<f64>>, y: RCow<RVector<f64>>) {
+    [x.is_fresh(), y.is_fresh()]
+}
+
+#[roxido]
+fn cow_aliased() {
+    let x = RVector::from_value(1.0, 2, pc);
+    let y = RVector::from_value(1.0, 2, pc);
+    let mut result = Vec::new();
+    // Calling the generated entry point directly is the only way to pass one fresh object twice.
+    for (a, b) in [(x.sexp(), x.sexp()), (x.sexp(), y.sexp())] {
+        let pair = unsafe { RObject::from_sexp(pc.protect(cow_pair(a, b)), pc) };
+        result.extend(
+            pair.as_vector()
+                .unwrap()
+                .as_bool()
+                .unwrap()
+                .slice()
+                .iter()
+                .map(|&v| v != 0),
+        );
+    }
+    result.into_iter().to_r(pc)
+}
+
+static GUARD_DROPS: std::sync::atomic::AtomicI32 = std::sync::atomic::AtomicI32::new(0);
+
+struct Guard;
+
+impl Drop for Guard {
+    fn drop(&mut self) {
+        // R's API stays usable, and does not disturb R's pending long jump, while Rust unwinds.
+        let _ = RSymbol::from("roxido_guard").unwrap();
+        GUARD_DROPS.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+    }
+}
+
+#[roxido]
+fn guard_drops() {
+    GUARD_DROPS.swap(0, std::sync::atomic::Ordering::SeqCst)
+}
+
+// Each case makes R raise an error, or warn under options(warn = 2), from safe code.
+#[roxido]
+fn r_error(case: &str, x: &RObject) {
+    let _guard = Guard;
+    match case {
+        "to_i32" => _ = x.as_vector().stop().to_i32(pc),
+        "to_f64" => _ = x.as_vector().stop().to_f64(pc),
+        "to_u8" => _ = x.as_vector().stop().to_u8(pc),
+        "f64" => _ = x.as_scalar().stop().f64(),
+        "symbol" => _ = RSymbol::from(""),
+        "allocate" => _ = RVector::<f64>::new(1 << 52, pc),
+        "protect" => {
+            for i in 0..200_000 {
+                let _ = (i as f64).to_r(pc);
+            }
+        }
+        "random" => _ = R::random_bytes::<1>(),
+        "dim" => {
+            let y = RVector::from_value(0.0, 3, pc);
+            y.set_attribute(RSymbol::dim(), &[2, 2][..]);
+        }
+        "class" => RVector::from_value(0.0, 3, pc).set_class(&["factor"]),
+        _ => stop!("Unknown case."),
+    }
+    true
+}
+
+#[roxido]
+fn swallowed_r_error() {
+    let _guard = Guard;
+    // Catching R's jump abandons it, as R's own tryCatch does.
+    let result = catch_unwind(AssertUnwindSafe(|| {
+        pc.nested(|inner| _ = RVector::<f64>::new(1 << 52, inner))
+    }));
+    assert!(result.unwrap_err().downcast_ref::<RUnwind>().is_some());
+    42_i32.to_r(pc).get()
+}
+
+#[roxido]
+fn echo_str(x: &str) {
+    x
 }

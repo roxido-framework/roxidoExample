@@ -32,6 +32,20 @@ link <- if (Sys.info()[["sysname"]] == "Darwin") {
 } else if (.Platform$OS.type == "windows") {
   c("-L", paste0("native=", R.home("bin")), "-l", "R")
 }
+# Roxido calls C shims that a package compiles from src/shims.c, so link them in the same way.
+stopifnot(file.copy(file.path(root, "src/shims.c"), work))
+local({
+  old <- setwd(work)
+  on.exit(setwd(old))
+  log <- "shims.log"
+  status <- system2(file.path(R.home("bin"), "R"), c("CMD", "COMPILE", "shims.c"),
+    stdout = log, stderr = log)
+  if (status != 0L) {
+    writeLines(readLines(log))
+    stop("shims build failed")
+  }
+})
+link <- c(link, "-C", paste0("link-arg=", file.path(work, "shims.o")))
 dir <- new_crate("thread-safety", "cdylib")
 cargo(dir, c("rustc", "--lib"), c("--", link))
 prefix <- if (.Platform$OS.type == "windows") "" else "lib"
@@ -68,6 +82,15 @@ for (name in c("fill_list", "set_values")) for (n in c(0L, 100000L)) {
   list <- call(name, n)
   stopifnot(length(list) == n, all(unlist(list) == seq_len(n)))
 }
+# Strings are read as UTF-8: ASCII and UTF-8 as they are, others translated, bytes rejected.
+utf8 <- "caf\u00e9"
+for (x in list("abc", utf8, iconv(utf8, "UTF-8", "latin1"))) {
+  y <- call("echo_str", x)
+  stopifnot(identical(y, enc2utf8(x)), Encoding(y) %in% c("unknown", "UTF-8"))
+}
+error <- tryCatch(call("echo_str", `Encoding<-`(utf8, "bytes")), error = conditionMessage)
+stopifnot(grepl("bytes", error, fixed = TRUE))
+stopifnot(identical(call("echo_str", `Encoding<-`("abc", "bytes")), "abc"))
 error <- tryCatch(call("nul_message"), error = conditionMessage)
 stopifnot(identical(error, "before"))
 
@@ -92,7 +115,8 @@ tryCatch({
     for (name in c("clone_object", "borrow_mutable_object", "borrow_mutable_element")) {
       arg <- if (name == "borrow_mutable_element") list(value) else value
       error <- tryCatch(call(name, arg), error = conditionMessage)
-      stopifnot(is.character(error), grepl("unsafe borrowing", error, fixed = TRUE))
+      expected <- if (name == "borrow_mutable_object") "R cannot copy" else "unsafe borrowing"
+      stopifnot(is.character(error), grepl(expected, error, fixed = TRUE))
     }
   }
   invisible(call("pointer_in_place", pointer))
@@ -123,9 +147,70 @@ tryCatch({
   bump_first <- getNativeSymbolInfo("bump_first", library)
   l <- list(c(1, 2))
   stopifnot(identical(.Call(bump_first, l), list(c(2, 2))), identical(l, list(c(1, 2))))
+  # An R error, or a warning turned into one, inside R's API unwinds Rust frames, and their
+  # destructors can still use R's API, before R's jump resumes.
+  r_error <- function(case, x = NULL) .Call(getNativeSymbolInfo("r_error", library), case, x)
+  invisible(call("guard_drops"))
+  warn_cases <- list(to_i32 = "a", to_f64 = "a", to_u8 = 300L, f64 = "a")
+  for (case in names(warn_cases)) {
+    x <- warn_cases[[case]]
+    stopifnot(identical(tryCatch(r_error(case, x), warning = function(w) "caught"), "caught"))
+    old <- options(warn = 2)
+    error <- tryCatch(r_error(case, x), error = conditionMessage)
+    options(old)
+    stopifnot(grepl("converted from warning", error, fixed = TRUE))
+    stopifnot(identical(call("guard_drops"), 2L))
+  }
+  stopifnot(identical(tryCatch(r_error("f64", as.raw(1)), error = function(e) "caught"), "caught"))
+  for (case in c("symbol", "allocate", "protect", "dim", "class")) {
+    stopifnot(identical(tryCatch(r_error(case), error = function(e) "caught"), "caught"))
+  }
+  stopifnot(identical(call("guard_drops"), 6L))
+  old_seed <- if (exists(".Random.seed", globalenv())) get(".Random.seed", globalenv())
+  assign(".Random.seed", "invalid", envir = globalenv())
+  old <- options(warn = 2)
+  error <- tryCatch(r_error("random"), error = conditionMessage)
+  options(old)
+  if (is.null(old_seed)) rm(".Random.seed", envir = globalenv()) else
+    assign(".Random.seed", old_seed, envir = globalenv())
+  stopifnot(grepl(".Random.seed", error, fixed = TRUE), identical(call("guard_drops"), 1L))
+  invisible(capture.output(stopifnot(identical(call("swallowed_r_error"), 42L)),
+    type = "message"))
+  stopifnot(identical(call("guard_drops"), 1L))
+
+  # RCow arguments are strict, fresh only when nothing else references them, and stay fresh
+  # through a coercion that makes a new object. ALTREP sequences are always shared.
+  cow_fresh <- getNativeSymbolInfo("cow_fresh", library)
+  y <- c(1, 2)
+  stopifnot(isTRUE(.Call(cow_fresh, y * 1)), isFALSE(.Call(cow_fresh, y)))
+  for (x in list(1:2, c(TRUE, FALSE), "a")) {
+    error <- tryCatch(.Call(cow_fresh, x), error = conditionMessage)
+    stopifnot(identical(error, "'x' is expected to have storage mode double."))
+  }
+  cow_scale <- getNativeSymbolInfo("cow_scale", library)
+  stopifnot(identical(.Call(cow_scale, y), c(2, 4)), identical(y, c(1, 2)))
+  stopifnot(identical(.Call(cow_scale, y + 0), c(2, 4)))
+  cow_coerce <- getNativeSymbolInfo("cow_coerce", library)
+  yi <- c(1L, 2L)
+  ys <- 1:2
+  stopifnot(identical(.Call(cow_coerce, yi), structure(c(2, 2), fresh = TRUE)),
+    identical(.Call(cow_coerce, ys), structure(c(2, 2), fresh = FALSE)),
+    identical(.Call(cow_coerce, y), structure(c(2, 2), fresh = FALSE)),
+    identical(.Call(cow_coerce, y * 1), structure(c(2, 2), fresh = TRUE)),
+    identical(yi, c(1L, 2L)), identical(ys, 1:2), identical(y, c(1, 2)))
+  stopifnot(identical(call("cow_aliased"), c(FALSE, FALSE, TRUE, TRUE)))
   w <- c(1, 2)
-  invisible(call("bump_in_place", w))
+  invisible(call("bump_in_place", w, NULL))
   stopifnot(identical(w, c(2, 2)))
+  error <- tryCatch(call("bump_in_place", w, w), error = conditionMessage)
+  stopifnot(identical(error,
+    "'x' cannot be modified in place because it is passed in another argument too."))
+  error <- tryCatch(call("object_in_place", NULL), error = conditionMessage)
+  stopifnot(identical(error, "'x' cannot be modified in place because it is NULL."))
+  stopifnot(identical(call("optional_cow", NULL), -1), identical(call("optional_cow", w), 3),
+    identical(w, c(2, 2)))
+  error <- tryCatch(call("optional_cow", 1L), error = conditionMessage)
+  stopifnot(identical(error, "'x' is expected to have storage mode double."))
   callbacks <- list(function() call("callback_error"), function() call("embedded_nul"),
     function() call("raw_r_error"), function() stop("R error"))
   for (f in callbacks) {

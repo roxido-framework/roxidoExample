@@ -30,7 +30,7 @@
 //! impl roxido::RObjectVariant for Fake {}
 //! ```
 //!
-//! Raw pointers, protection counters, and in-place arguments need `unsafe`.
+//! Raw pointers and protection counters need `unsafe`.
 //!
 //! ```compile_fail
 //! use roxido::*;
@@ -73,6 +73,68 @@
 //! use roxido::*;
 //! #[roxido]
 //! fn f(x: &mut RSymbol) {}
+//! ```
+//!
+//! Arguments are modified through `RCow`, which copies only what R can copy, and modifies R's
+//! object only through `unsafe`. Each handle gives write access once.
+//!
+//! ```compile_fail
+//! use roxido::*;
+//! #[roxido]
+//! fn f(x: &mut RVector<f64>) {}
+//! ```
+//! ```compile_fail
+//! use roxido::*;
+//! #[roxido]
+//! fn f(x: Option<&mut [f64]>) {}
+//! ```
+//! ```compile_fail
+//! use roxido::*;
+//! #[roxido]
+//! fn f(x: RCow<RFunction>) {}
+//! ```
+//! ```compile_fail
+//! use roxido::*;
+//! fn f<'a>(x: RCow<'a, RExternalPtr>, pc: &'a Pc) { x.into_mut_or_copy(pc); }
+//! ```
+//! ```compile_fail
+//! use roxido::*;
+//! fn f<'a>(x: RCow<'a, RSymbol>, pc: &'a Pc) { x.into_mut_or_copy(pc); }
+//! ```
+//! ```compile_fail
+//! use roxido::*;
+//! fn f(x: RCow<RVector<f64>>) { x.into_mut_in_place(); }
+//! ```
+//! ```compile_fail
+//! use roxido::*;
+//! fn f(x: RCow<RVector<f64>>) {
+//!     let a = x.try_into_mut();
+//!     let b = x.try_into_mut();
+//! }
+//! ```
+//! ```compile_fail
+//! use roxido::*;
+//! fn f(arg: RArg) {
+//!     let a = arg.into_cow();
+//!     let b = arg.into_cow();
+//! }
+//! ```
+//! ```compile_fail
+//! use roxido::*;
+//! fn f<'a>(sexp: SEXP, pc: &'a Pc) -> RArg<'a> { RArg { sexp, name: "x", all: &[], pc } }
+//! ```
+//!
+//! Arguments have types that convert from R objects; `SEXP` can already be `NULL`.
+//!
+//! ```compile_fail
+//! use roxido::*;
+//! #[roxido]
+//! fn f(x: Vec<f64>) {}
+//! ```
+//! ```compile_fail
+//! use roxido::*;
+//! #[roxido]
+//! fn f(x: Option<SEXP>) {}
 //! ```
 //!
 //! References cannot outlive the counter protecting their object.
